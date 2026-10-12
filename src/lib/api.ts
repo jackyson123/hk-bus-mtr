@@ -19,8 +19,8 @@ export async function getKmbRoutes(): Promise<BusRoute[]> {
     dest_en: r.dest_en,
     orig_tc: r.orig_tc,
     orig_en: r.orig_en,
-    service_type: r.service_type,
-    bound: r.bound,
+    service_type: String(r.service_type ?? '1'),
+    bound: r.bound, // O / I
     operator: 'KMB' as const,
   }))
 }
@@ -37,8 +37,34 @@ export async function getKmbStops(): Promise<BusStop[]> {
   }))
 }
 
-export async function getKmbRouteStops(route: string, direction: string, serviceType: string | number) {
-  const dir = direction === 'I' || direction === 'inbound' ? 'inbound' : 'outbound'
+export async function getKmbStopById(stopId: string): Promise<BusStop | null> {
+  try {
+    const data = await fetchJson<{ data: any }>(`${KMB_BASE}/stop/${stopId}`)
+    const s = data.data
+    if (!s) return null
+    return {
+      id: s.stop,
+      name_tc: s.name_tc,
+      name_en: s.name_en,
+      lat: parseFloat(s.lat),
+      lng: parseFloat(s.long),
+      operator: 'KMB',
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Route-stop list: returns [{ seq, stop }] */
+export async function getKmbRouteStops(
+  route: string,
+  direction: string,
+  serviceType: string | number
+) {
+  const dir =
+    direction === 'I' || direction === 'inbound' || direction === '1'
+      ? 'inbound'
+      : 'outbound'
   const data = await fetchJson<{ data: any[] }>(
     `${KMB_BASE}/route-stop/${route}/${dir}/${serviceType}`
   )
@@ -60,7 +86,11 @@ export async function getKmbStopEta(stopId: string): Promise<EtaItem[]> {
   }))
 }
 
-export async function getKmbEta(stopId: string, route: string, serviceType: string | number): Promise<EtaItem[]> {
+export async function getKmbEta(
+  stopId: string,
+  route: string,
+  serviceType: string | number
+): Promise<EtaItem[]> {
   const data = await fetchJson<{ data: any[] }>(
     `${KMB_BASE}/eta/${stopId}/${route}/${serviceType}`
   )
@@ -108,7 +138,10 @@ export async function getCtbStop(stopId: string): Promise<BusStop | null> {
   }
 }
 
-export async function getCtbRouteStops(route: string, direction: 'inbound' | 'outbound') {
+export async function getCtbRouteStops(
+  route: string,
+  direction: 'inbound' | 'outbound'
+) {
   const data = await fetchJson<{ data: any[] }>(
     `${CTB_BASE}/route-stop/CTB/${route}/${direction}`
   )
@@ -116,7 +149,9 @@ export async function getCtbRouteStops(route: string, direction: 'inbound' | 'ou
 }
 
 export async function getCtbEta(stopId: string, route: string): Promise<EtaItem[]> {
-  const data = await fetchJson<{ data: any[] }>(`${CTB_BASE}/eta/CTB/${stopId}/${route}`)
+  const data = await fetchJson<{ data: any[] }>(
+    `${CTB_BASE}/eta/CTB/${stopId}/${route}`
+  )
   return (data.data || []).map((e) => ({
     route: e.route,
     dest_tc: e.dest_tc,
@@ -130,8 +165,170 @@ export async function getCtbEta(stopId: string, route: string): Promise<EtaItem[
   }))
 }
 
+// ---------- Combined route lookup ----------
+export interface RouteVariant {
+  operator: 'KMB' | 'CTB'
+  route: string
+  bound: string // O / I or outbound / inbound
+  service_type: string
+  dest_tc: string
+  dest_en: string
+  orig_tc: string
+  orig_en: string
+  label_tc: string
+  label_en: string
+}
+
+export interface RouteStopItem {
+  seq: number
+  stopId: string
+  name_tc: string
+  name_en: string
+  lat: number
+  lng: number
+  operator: 'KMB' | 'CTB'
+}
+
+/** Search KMB + CTB by route number, return variants (direction / service type) */
+export async function searchRouteVariants(routeNo: string): Promise<RouteVariant[]> {
+  const q = routeNo.trim().toUpperCase()
+  if (!q) return []
+
+  const variants: RouteVariant[] = []
+
+  // KMB
+  try {
+    const kmbAll = await getKmbRoutes()
+    const kmbMatched = kmbAll.filter((r) => r.route.toUpperCase() === q)
+    for (const r of kmbMatched) {
+      const bound = r.bound === 'I' ? 'I' : 'O'
+      variants.push({
+        operator: 'KMB',
+        route: r.route,
+        bound,
+        service_type: String(r.service_type ?? '1'),
+        dest_tc: r.dest_tc,
+        dest_en: r.dest_en,
+        orig_tc: r.orig_tc,
+        orig_en: r.orig_en,
+        label_tc: `${r.route} → ${r.dest_tc}`,
+        label_en: `${r.route} → ${r.dest_en}`,
+      })
+    }
+  } catch (e) {
+    console.error('KMB route search failed', e)
+  }
+
+  // CTB
+  try {
+    const ctbAll = await getCtbRoutes()
+    const ctbMatched = ctbAll.filter((r) => r.route.toUpperCase() === q)
+    for (const r of ctbMatched) {
+      // CTB route list may not include bound; we add both directions
+      for (const bound of ['outbound', 'inbound'] as const) {
+        variants.push({
+          operator: 'CTB',
+          route: r.route,
+          bound,
+          service_type: '1',
+          dest_tc: bound === 'outbound' ? r.dest_tc : r.orig_tc,
+          dest_en: bound === 'outbound' ? r.dest_en : r.orig_en,
+          orig_tc: bound === 'outbound' ? r.orig_tc : r.dest_tc,
+          orig_en: bound === 'outbound' ? r.orig_en : r.dest_en,
+          label_tc: `城巴 ${r.route} ${bound === 'outbound' ? r.orig_tc + '→' + r.dest_tc : r.dest_tc + '→' + r.orig_tc}`,
+          label_en: `CTB ${r.route} ${bound === 'outbound' ? r.orig_en + '→' + r.dest_en : r.dest_en + '→' + r.orig_en}`,
+        })
+      }
+    }
+  } catch (e) {
+    console.error('CTB route search failed', e)
+  }
+
+  return variants
+}
+
+/** Load ordered stops for a route variant, with names & coords */
+export async function loadRouteStops(
+  variant: RouteVariant,
+  kmbStopMap?: Map<string, BusStop>
+): Promise<RouteStopItem[]> {
+  if (variant.operator === 'KMB') {
+    const raw = await getKmbRouteStops(
+      variant.route,
+      variant.bound,
+      variant.service_type
+    )
+    const items: RouteStopItem[] = []
+    for (const row of raw) {
+      const stopId = row.stop
+      let name_tc = stopId
+      let name_en = stopId
+      let lat = 0
+      let lng = 0
+      const cached = kmbStopMap?.get(stopId)
+      if (cached) {
+        name_tc = cached.name_tc
+        name_en = cached.name_en
+        lat = cached.lat
+        lng = cached.lng
+      } else {
+        const s = await getKmbStopById(stopId)
+        if (s) {
+          name_tc = s.name_tc
+          name_en = s.name_en
+          lat = s.lat
+          lng = s.lng
+        }
+      }
+      items.push({
+        seq: Number(row.seq) || items.length + 1,
+        stopId,
+        name_tc,
+        name_en,
+        lat,
+        lng,
+        operator: 'KMB',
+      })
+    }
+    return items.sort((a, b) => a.seq - b.seq)
+  }
+
+  // CTB
+  const dir = variant.bound === 'inbound' ? 'inbound' : 'outbound'
+  const raw = await getCtbRouteStops(variant.route, dir)
+  const items: RouteStopItem[] = []
+  for (const row of raw) {
+    const stopId = row.stop
+    let name_tc = stopId
+    let name_en = stopId
+    let lat = 0
+    let lng = 0
+    const s = await getCtbStop(stopId)
+    if (s) {
+      name_tc = s.name_tc
+      name_en = s.name_en
+      lat = s.lat
+      lng = s.lng
+    }
+    items.push({
+      seq: Number(row.seq) || items.length + 1,
+      stopId,
+      name_tc,
+      name_en,
+      lat,
+      lng,
+      operator: 'CTB',
+    })
+  }
+  return items.sort((a, b) => a.seq - b.seq)
+}
+
 // ---------- MTR ----------
-export async function getMtrSchedule(line: string, station: string, lang: 'TC' | 'EN' = 'TC'): Promise<{
+export async function getMtrSchedule(
+  line: string,
+  station: string,
+  lang: 'TC' | 'EN' = 'TC'
+): Promise<{
   up: MtrSchedule[]
   down: MtrSchedule[]
   isDelay: boolean
@@ -170,7 +367,12 @@ export function formatEta(eta: string | null, lang: 'tc' | 'en'): string {
   return lang === 'tc' ? `${diffMin} 分鐘` : `${diffMin} mins`
 }
 
-export function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversine(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
   const R = 6371000
   const toRad = (x: number) => (x * Math.PI) / 180
   const dLat = toRad(lat2 - lat1)
