@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Leaflet dark-ish tweaks */
+.leaflet-container {
+  background: #0f172a;
+  font-family: inherit;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.leaflet-popup-tip {
+  background: #1e293b;
+}
+
+.leaflet-popup-content {
+  margin: 10px 14px;
+  font-size: 13px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Mobile map toggle animation */
+.map-panel {
+  transition: height 0.3s ease, opacity 0.3s ease;
+}
