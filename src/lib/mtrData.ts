@@ -142,3 +142,20 @@ export const MTR_STATIONS: Record<string, MtrStation[]> = {
     { code: 'DIS', name_tc: '迪士尼', name_en: 'Disneyland Resort', line: 'DRL' },
   ],
 }
+
+
+/** All station codes → bilingual names (from all lines) */
+export const STATION_NAME_MAP: Record<string, { tc: string; en: string }> = {}
+for (const list of Object.values(MTR_STATIONS)) {
+  for (const s of list) {
+    if (!STATION_NAME_MAP[s.code]) {
+      STATION_NAME_MAP[s.code] = { tc: s.name_tc, en: s.name_en }
+    }
+  }
+}
+
+export function stationDisplayName(code: string, lang: 'tc' | 'en'): string {
+  const n = STATION_NAME_MAP[code]
+  if (!n) return code
+  return lang === 'tc' ? n.tc : n.en
+}

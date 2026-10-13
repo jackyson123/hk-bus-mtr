@@ -384,9 +384,11 @@ export async function getMtrSchedule(
   const parse = (arr: any[] = [], dir: 'UP' | 'DOWN'): MtrSchedule[] =>
     (arr || []).map((t, i) => ({
       dest: t.dest || t.dest_tc || '',
-      time: t.ttnt || t.time || '-',
-      plat: t.plat || '',
-      seq: i + 1,
+      destName: t.dest || '',
+      time: t.time || '',
+      ttnt: Number(t.ttnt ?? NaN),
+      plat: String(t.plat ?? ''),
+      seq: Number(t.seq) || i + 1,
       direction: dir,
     }))
 
