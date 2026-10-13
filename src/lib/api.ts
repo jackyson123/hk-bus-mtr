@@ -107,6 +107,48 @@ export async function getKmbEta(
   }))
 }
 
+/** ETA for every stop on a KMB route (by service_type). Groups by seq. */
+export async function getKmbRouteEta(
+  route: string,
+  serviceType: string | number
+): Promise<
+  {
+    seq: number
+    dir: string
+    etas: { eta: string | null; eta_seq: number; rmk_tc?: string; rmk_en?: string }[]
+  }[]
+> {
+  const data = await fetchJson<{ data: any[] }>(
+    `${KMB_BASE}/route-eta/${route}/${serviceType}`
+  )
+  const bySeq = new Map<
+    number,
+    {
+      seq: number
+      dir: string
+      etas: { eta: string | null; eta_seq: number; rmk_tc?: string; rmk_en?: string }[]
+    }
+  >()
+  for (const row of data.data || []) {
+    const seq = Number(row.seq)
+    if (!bySeq.has(seq)) {
+      bySeq.set(seq, { seq, dir: row.dir || '', etas: [] })
+    }
+    bySeq.get(seq)!.etas.push({
+      eta: row.eta ?? null,
+      eta_seq: row.eta_seq,
+      rmk_tc: row.rmk_tc,
+      rmk_en: row.rmk_en,
+    })
+  }
+  return Array.from(bySeq.values())
+    .map((g) => ({
+      ...g,
+      etas: g.etas.sort((a, b) => a.eta_seq - b.eta_seq),
+    }))
+    .sort((a, b) => a.seq - b.seq)
+}
+
 // ---------- Citybus ----------
 export async function getCtbRoutes(): Promise<BusRoute[]> {
   const data = await fetchJson<{ data: any[] }>(`${CTB_BASE}/route/CTB`)
@@ -356,15 +398,19 @@ export async function getMtrSchedule(
 }
 
 // ---------- Helpers ----------
+/** Display as clock time HH:mm (Hong Kong local), not minutes */
 export function formatEta(eta: string | null, lang: 'tc' | 'en'): string {
-  if (!eta) return lang === 'tc' ? '暫時沒有班次' : 'No ETA'
+  if (!eta) return lang === 'tc' ? '—' : '—'
   const d = new Date(eta)
   if (isNaN(d.getTime())) return eta
   const now = Date.now()
-  const diffMin = Math.round((d.getTime() - now) / 60000)
-  if (diffMin <= 0) return lang === 'tc' ? '即將到達' : 'Arriving'
-  if (diffMin === 1) return lang === 'tc' ? '1 分鐘' : '1 min'
-  return lang === 'tc' ? `${diffMin} 分鐘` : `${diffMin} mins`
+  if (d.getTime() - now <= 0) {
+    return lang === 'tc' ? '即將到' : 'Due'
+  }
+  // Asia/Hong_Kong style 24h clock
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
 }
 
 export function haversine(

@@ -3,12 +3,16 @@ import MapView from './components/MapView'
 import EtaList from './components/EtaList'
 import MtrPanel from './components/MtrPanel'
 import { useGeolocation } from './hooks/useGeolocation'
+import { useFavorites } from './hooks/useFavorites'
+import { useReminders } from './hooks/useReminders'
 import {
   getKmbStops,
   getKmbStopEta,
   getCtbEta,
+  getKmbRouteEta,
   searchRouteVariants,
   loadRouteStops,
+  formatEta,
   haversine,
   type RouteVariant,
   type RouteStopItem,
@@ -16,7 +20,7 @@ import {
 import type { BusStop, EtaItem, Lang, NearbyStop } from './types'
 
 type Tab = 'bus' | 'mtr'
-type BusMode = 'route' | 'nearby'
+type BusMode = 'route' | 'nearby' | 'search' | 'favorites'
 
 export default function App() {
   const [lang, setLang] = useState<Lang>('tc')
@@ -35,6 +39,8 @@ export default function App() {
   const [nearby, setNearby] = useState<NearbyStop[]>([])
   const [nearbyFilter, setNearbyFilter] = useState('')
   const [stopsLoading, setStopsLoading] = useState(true)
+  const [stopNameQuery, setStopNameQuery] = useState('')
+  const [toast, setToast] = useState<string | null>(null)
 
   // Route search
   const [routeQuery, setRouteQuery] = useState('')
@@ -44,12 +50,34 @@ export default function App() {
   const [routeLoading, setRouteLoading] = useState(false)
   const [stopsLoadingRoute, setStopsLoadingRoute] = useState(false)
   const [routeError, setRouteError] = useState<string | null>(null)
+  /** seq -> next few clock ETAs for current route variant */
+  const [routeEtaBySeq, setRouteEtaBySeq] = useState<
+    Record<number, { eta: string | null; eta_seq: number }[]>
+  >({})
 
   // CTB: when showing stop ETA we only get KMB from stop-eta; for CTB we also fetch route-specific if needed
   const [ctbFocusRoute, setCtbFocusRoute] = useState<string | null>(null)
 
   const { lat, lng, error: geoError, loading: geoLoading, request: requestGeo } =
     useGeolocation(false)
+
+  const {
+    favStops,
+    favRoutes,
+    isStopFav,
+    isRouteFav,
+    toggleStop,
+    toggleRoute,
+    removeStop,
+    removeRoute,
+  } = useFavorites()
+
+  const { reminders, addReminder, cancelReminder } = useReminders(lang)
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg)
+    window.setTimeout(() => setToast(null), 2800)
+  }, [])
 
   // Load KMB stops once (for names + nearby)
   useEffect(() => {
@@ -147,6 +175,34 @@ export default function App() {
     )
   }, [nearby, nearbyFilter])
 
+  const stopNameResults = useMemo(() => {
+    const q = stopNameQuery.trim()
+    if (q.length < 1) return [] as BusStop[]
+    const lower = q.toLowerCase()
+    const scored = allKmbStops
+      .filter(
+        (s) =>
+          s.name_tc.includes(q) ||
+          s.name_en.toLowerCase().includes(lower)
+      )
+      .map((s) => {
+        let score = 0
+        if (s.name_tc === q || s.name_en.toLowerCase() === lower) score = 100
+        else if (s.name_tc.startsWith(q) || s.name_en.toLowerCase().startsWith(lower))
+          score = 50
+        else score = 10
+        if (lat && lng && s.lat && s.lng) {
+          const d = haversine(lat, lng, s.lat, s.lng)
+          score += Math.max(0, 20 - d / 500)
+        }
+        return { s, score }
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 40)
+      .map((x) => x.s)
+    return scored
+  }, [stopNameQuery, allKmbStops, lat, lng])
+
   const handleSelectStop = (stop: BusStop) => {
     setSelectedStop(stop)
     setTab('bus')
@@ -179,8 +235,11 @@ export default function App() {
     setVariants([])
     setSelectedVariant(null)
     setRouteStops([])
+    setRouteEtaBySeq({})
     setSelectedStop(null)
     setEtas([])
+    setBusMode('route')
+    setMapExpanded(true)
     try {
       const list = await searchRouteVariants(q)
       if (!list.length) {
@@ -207,11 +266,11 @@ export default function App() {
     setSelectedVariant(v)
     setStopsLoadingRoute(true)
     setRouteStops([])
+    setRouteEtaBySeq({})
     setSelectedStop(null)
     setEtas([])
     try {
       const stops = await loadRouteStops(v, kmbStopMap)
-      // Filter empty CTB directions
       if (!stops.length && v.operator === 'CTB') {
         setRouteError(
           lang === 'tc'
@@ -222,6 +281,55 @@ export default function App() {
         setRouteError(null)
       }
       setRouteStops(stops)
+      // 地圖自動展開並對準該線
+      setMapExpanded(true)
+      setBusMode('route')
+
+      // Auto-load clock ETAs for every stop on this route
+      if (v.operator === 'KMB') {
+        try {
+          const all = await getKmbRouteEta(v.route, v.service_type)
+          const wantDir = v.bound === 'I' ? 'I' : 'O'
+          const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
+          for (const g of all) {
+            if (g.dir && g.dir !== wantDir) continue
+            map[g.seq] = g.etas.slice(0, 3).map((e) => ({
+              eta: e.eta,
+              eta_seq: e.eta_seq,
+            }))
+          }
+          if (!Object.keys(map).length) {
+            for (const g of all) {
+              map[g.seq] = g.etas.slice(0, 3).map((e) => ({
+                eta: e.eta,
+                eta_seq: e.eta_seq,
+              }))
+            }
+          }
+          setRouteEtaBySeq(map)
+        } catch (e) {
+          console.error('route-eta failed', e)
+        }
+      } else {
+        const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
+        const batch = stops.slice(0, 25)
+        await Promise.all(
+          batch.map(async (s) => {
+            try {
+              const etas = await getCtbEta(s.stopId, v.route)
+              if (etas.length) {
+                map[s.seq] = etas.slice(0, 3).map((e) => ({
+                  eta: e.eta,
+                  eta_seq: e.eta_seq,
+                }))
+              }
+            } catch {
+              /* ignore */
+            }
+          })
+        )
+        setRouteEtaBySeq(map)
+      }
     } catch (e: any) {
       setRouteError(e.message || 'Failed to load stops')
     } finally {
@@ -229,7 +337,7 @@ export default function App() {
     }
   }
 
-  // Map markers: route stops if in route mode with data, else nearby
+  // Map markers
   const mapStops: BusStop[] = useMemo(() => {
     if (busMode === 'route' && routeStops.length) {
       return routeStops
@@ -243,8 +351,39 @@ export default function App() {
           operator: s.operator,
         }))
     }
+    if (busMode === 'search' && stopNameResults.length) {
+      return stopNameResults.filter((s) => s.lat && s.lng)
+    }
+    if (busMode === 'favorites' && favStops.length) {
+      return favStops.map((s) => ({
+        id: s.id,
+        name_tc: s.name_tc,
+        name_en: s.name_en,
+        lat: s.lat,
+        lng: s.lng,
+        operator: s.operator as BusStop['operator'],
+      }))
+    }
     return filteredNearby.length ? filteredNearby : nearby
-  }, [busMode, routeStops, filteredNearby, nearby])
+  }, [busMode, routeStops, filteredNearby, nearby, stopNameResults, favStops])
+
+  const handleRemind = useCallback(
+    async (opts: {
+      route: string
+      dest: string
+      etaIso: string
+      minutesBefore: number
+    }) => {
+      if (!selectedStop) return
+      const res = await addReminder({
+        ...opts,
+        stopName:
+          lang === 'tc' ? selectedStop.name_tc : selectedStop.name_en,
+      })
+      showToast(res.message)
+    },
+    [selectedStop, addReminder, lang, showToast]
+  )
 
   return (
     <div className="h-full flex flex-col bg-slate-950 text-slate-100">
@@ -312,7 +451,7 @@ export default function App() {
         {tab === 'bus' && (
           <div
             className={`map-panel relative border-b md:border-b-0 md:border-r border-slate-800 md:h-auto md:w-[45%] lg:w-[50%] ${
-              mapExpanded ? 'h-52' : 'h-10'
+              mapExpanded ? 'h-64' : 'h-10'
             }`}
           >
             <button
@@ -338,6 +477,18 @@ export default function App() {
                 onSelectStop={handleSelectStop}
                 lang={lang}
                 height="100%"
+                fitToStops={
+                  (busMode === 'route' && routeStops.length > 0) ||
+                  (busMode === 'search' && stopNameResults.length > 0)
+                }
+                fitKey={
+                  busMode === 'route' && selectedVariant
+                    ? `${selectedVariant.operator}-${selectedVariant.route}-${selectedVariant.bound}-${selectedVariant.service_type}-${routeStops.length}`
+                    : busMode === 'search'
+                    ? `search-${stopNameQuery}-${stopNameResults.length}`
+                    : ''
+                }
+                showRouteLine={busMode === 'route' && routeStops.length > 1}
               />
             </div>
           </div>
@@ -349,28 +500,28 @@ export default function App() {
             <MtrPanel lang={lang} />
           ) : (
             <>
-              {/* Mode: route vs nearby */}
-              <div className="flex-shrink-0 px-3 pt-3 flex gap-2">
-                <button
-                  onClick={() => setBusMode('route')}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium border transition ${
-                    busMode === 'route'
-                      ? 'bg-slate-700 border-slate-500 text-white'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  {lang === 'tc' ? '輸入路線' : 'By route'}
-                </button>
-                <button
-                  onClick={() => setBusMode('nearby')}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium border transition ${
-                    busMode === 'nearby'
-                      ? 'bg-slate-700 border-slate-500 text-white'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  {lang === 'tc' ? '附近車站' : 'Nearby'}
-                </button>
+              {/* Mode tabs */}
+              <div className="flex-shrink-0 px-3 pt-3 grid grid-cols-4 gap-1.5">
+                {(
+                  [
+                    ['route', lang === 'tc' ? '路線' : 'Route'],
+                    ['search', lang === 'tc' ? '站名' : 'Stop'],
+                    ['nearby', lang === 'tc' ? '附近' : 'Near'],
+                    ['favorites', lang === 'tc' ? '收藏' : 'Fav'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setBusMode(mode)}
+                    className={`py-2 rounded-xl text-xs font-medium border transition ${
+                      busMode === mode
+                        ? 'bg-slate-700 border-slate-500 text-white'
+                        : 'bg-slate-900 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               {busMode === 'route' ? (
@@ -417,28 +568,244 @@ export default function App() {
                           selectedVariant?.bound === v.bound &&
                           selectedVariant?.service_type === v.service_type
                         return (
-                          <button
-                            key={key}
-                            onClick={() => pickVariant(v)}
-                            className={`text-left px-3 py-2 rounded-xl text-xs border transition ${
-                              active
-                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-                                : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-500'
-                            }`}
-                          >
-                            <span
-                              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold mr-2 ${
-                                v.operator === 'KMB'
-                                  ? 'bg-kmb text-white'
-                                  : 'bg-ctb text-white'
+                          <div key={key} className="flex gap-1 items-stretch">
+                            <button
+                              onClick={() => pickVariant(v)}
+                              className={`flex-1 text-left px-3 py-2 rounded-xl text-xs border transition ${
+                                active
+                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+                                  : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-500'
                               }`}
                             >
-                              {v.operator}
-                            </span>
-                            {lang === 'tc' ? v.label_tc : v.label_en}
-                          </button>
+                              <span
+                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold mr-2 ${
+                                  v.operator === 'KMB'
+                                    ? 'bg-kmb text-white'
+                                    : 'bg-ctb text-white'
+                                }`}
+                              >
+                                {v.operator}
+                              </span>
+                              {lang === 'tc' ? v.label_tc : v.label_en}
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 rounded-xl border border-slate-700 text-amber-400 text-sm"
+                              onClick={() => {
+                                toggleRoute(v)
+                                showToast(
+                                  isRouteFav(v)
+                                    ? lang === 'tc'
+                                      ? '已取消收藏路線'
+                                      : 'Route unfavourited'
+                                    : lang === 'tc'
+                                    ? '已收藏路線'
+                                    : 'Route saved'
+                                )
+                              }}
+                            >
+                              {isRouteFav(v) ? '★' : '☆'}
+                            </button>
+                          </div>
                         )
                       })}
+                    </div>
+                  )}
+                </div>
+              ) : busMode === 'search' ? (
+                <div className="flex-shrink-0 p-3 space-y-2 border-b border-slate-800">
+                  <input
+                    type="search"
+                    value={stopNameQuery}
+                    onChange={(e) => setStopNameQuery(e.target.value)}
+                    placeholder={
+                      lang === 'tc'
+                        ? '輸入站名，例如 旺角、彌敦道…'
+                        : 'Stop name e.g. Mong Kok…'
+                    }
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500"
+                  />
+                  {stopsLoading && (
+                    <p className="text-xs text-slate-400">
+                      {lang === 'tc' ? '載入站名資料中…' : 'Loading stop names…'}
+                    </p>
+                  )}
+                  <div className="max-h-48 overflow-y-auto space-y-1">
+                    {stopNameQuery.trim() && stopNameResults.length === 0 && !stopsLoading && (
+                      <p className="text-xs text-slate-500 py-2">
+                        {lang === 'tc' ? '找不到相關車站' : 'No matching stops'}
+                      </p>
+                    )}
+                    {stopNameResults.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          handleSelectStop(s)
+                          setMapExpanded(true)
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
+                          selectedStop?.id === s.id
+                            ? 'bg-emerald-500/15 border border-emerald-500/30'
+                            : 'hover:bg-slate-800/80'
+                        }`}
+                      >
+                        <span className="flex-1 truncate">
+                          {lang === 'tc' ? s.name_tc : s.name_en}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-sm px-1"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleStop(s)
+                            showToast(
+                              isStopFav(s.operator, s.id)
+                                ? lang === 'tc'
+                                  ? '已取消收藏'
+                                  : 'Removed favourite'
+                                : lang === 'tc'
+                                ? '已加入收藏'
+                                : 'Saved to favourites'
+                            )
+                          }}
+                        >
+                          {isStopFav(s.operator, s.id) ? '★' : '☆'}
+                        </button>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : busMode === 'favorites' ? (
+                <div className="flex-shrink-0 p-3 space-y-3 border-b border-slate-800 max-h-56 overflow-y-auto">
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                      {lang === 'tc' ? '收藏車站' : 'Favourite stops'}
+                    </p>
+                    {favStops.length === 0 ? (
+                      <p className="text-xs text-slate-500">
+                        {lang === 'tc'
+                          ? '未有收藏。喺站名／附近／路線選站後撳 ★'
+                          : 'None yet. Tap ★ on a stop to save.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {favStops.map((s) => (
+                          <div
+                            key={`${s.operator}-${s.id}`}
+                            className="flex items-center gap-2"
+                          >
+                            <button
+                              onClick={() =>
+                                handleSelectStop({
+                                  id: s.id,
+                                  name_tc: s.name_tc,
+                                  name_en: s.name_en,
+                                  lat: s.lat,
+                                  lng: s.lng,
+                                  operator: s.operator as BusStop['operator'],
+                                })
+                              }
+                              className={`flex-1 text-left px-3 py-2 rounded-lg text-sm ${
+                                selectedStop?.id === s.id
+                                  ? 'bg-emerald-500/15 border border-emerald-500/30'
+                                  : 'bg-slate-800/60 hover:bg-slate-800'
+                              }`}
+                            >
+                              {lang === 'tc' ? s.name_tc : s.name_en}
+                            </button>
+                            <button
+                              type="button"
+                              className="text-amber-400 px-2"
+                              onClick={() => removeStop(s.operator, s.id)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                      {lang === 'tc' ? '收藏路線' : 'Favourite routes'}
+                    </p>
+                    {favRoutes.length === 0 ? (
+                      <p className="text-xs text-slate-500">
+                        {lang === 'tc'
+                          ? '未有收藏。選路線方向後撳 ★'
+                          : 'None yet. Tap ★ on a route variant.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {favRoutes.map((r) => (
+                          <div
+                            key={`${r.operator}-${r.route}-${r.bound}-${r.service_type}`}
+                            className="flex items-center gap-2"
+                          >
+                            <button
+                              onClick={() => {
+                                setBusMode('route')
+                                setRouteQuery(r.route)
+                                pickVariant({
+                                  operator: r.operator,
+                                  route: r.route,
+                                  bound: r.bound,
+                                  service_type: r.service_type,
+                                  dest_tc: r.dest_tc,
+                                  dest_en: r.dest_en,
+                                  orig_tc: r.orig_tc,
+                                  orig_en: r.orig_en,
+                                  label_tc: r.label_tc,
+                                  label_en: r.label_en,
+                                })
+                              }}
+                              className="flex-1 text-left px-3 py-2 rounded-lg text-xs bg-slate-800/60 hover:bg-slate-800"
+                            >
+                              <span
+                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold mr-1 ${
+                                  r.operator === 'KMB'
+                                    ? 'bg-kmb text-white'
+                                    : 'bg-ctb text-white'
+                                }`}
+                              >
+                                {r.operator}
+                              </span>
+                              {lang === 'tc' ? r.label_tc : r.label_en}
+                            </button>
+                            <button
+                              type="button"
+                              className="text-amber-400 px-2"
+                              onClick={() => removeRoute(r)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {reminders.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                        {lang === 'tc' ? '已設定提醒' : 'Active reminders'}
+                      </p>
+                      {reminders.map((r) => (
+                        <div
+                          key={r.id}
+                          className="flex items-center gap-2 text-xs text-slate-300 py-1"
+                        >
+                          <span className="flex-1 truncate">
+                            🔔 {r.route} · {r.stopName}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-slate-500"
+                            onClick={() => cancelReminder(r.id)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -497,7 +864,7 @@ export default function App() {
 
               {/* Route stop list — pick a stop to see ALL buses at that stop */}
               {busMode === 'route' && (stopsLoadingRoute || routeStops.length > 0) && (
-                <div className="flex-shrink-0 border-b border-slate-800 max-h-40 overflow-y-auto">
+                <div className="flex-shrink-0 border-b border-slate-800 max-h-64 overflow-y-auto">
                   {stopsLoadingRoute ? (
                     <div className="p-3 text-sm text-slate-400">
                       {lang === 'tc' ? '載入車站列表…' : 'Loading stops…'}
@@ -506,27 +873,48 @@ export default function App() {
                     <div className="p-2 space-y-1">
                       <p className="px-1 text-[10px] text-slate-500 uppercase tracking-wider">
                         {lang === 'tc'
-                          ? '選擇車站 → 顯示該站所有路線到站'
-                          : 'Select stop → all routes at this stop'}
+                          ? '各站到站時間（撳站可睇同站其他車）'
+                          : 'ETA per stop (tap for all routes at stop)'}
                       </p>
-                      {routeStops.map((s) => (
-                        <button
-                          key={`${s.operator}-${s.stopId}-${s.seq}`}
-                          onClick={() => handleSelectRouteStop(s)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
-                            selectedStop?.id === s.stopId
-                              ? 'bg-emerald-500/15 border border-emerald-500/30'
-                              : 'hover:bg-slate-800/80'
-                          }`}
-                        >
-                          <span className="text-slate-500 text-xs w-6 tabular-nums">
-                            {s.seq}
-                          </span>
-                          <span className="flex-1 truncate">
-                            {lang === 'tc' ? s.name_tc : s.name_en}
-                          </span>
-                        </button>
-                      ))}
+                      {routeStops.map((s) => {
+                        const times = routeEtaBySeq[s.seq] || []
+                        return (
+                          <button
+                            key={`${s.operator}-${s.stopId}-${s.seq}`}
+                            onClick={() => handleSelectRouteStop(s)}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
+                              selectedStop?.id === s.stopId
+                                ? 'bg-emerald-500/15 border border-emerald-500/30'
+                                : 'hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <span className="text-slate-500 text-xs w-6 tabular-nums flex-shrink-0">
+                              {s.seq}
+                            </span>
+                            <span className="flex-1 min-w-0 truncate">
+                              {lang === 'tc' ? s.name_tc : s.name_en}
+                            </span>
+                            <span className="flex-shrink-0 flex gap-1.5 tabular-nums text-xs font-medium">
+                              {times.length === 0 ? (
+                                <span className="text-slate-600">—</span>
+                              ) : (
+                                times.map((t, i) => (
+                                  <span
+                                    key={i}
+                                    className={
+                                      i === 0
+                                        ? 'text-emerald-300'
+                                        : 'text-slate-400'
+                                    }
+                                  >
+                                    {formatEta(t.eta, lang)}
+                                  </span>
+                                ))
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -534,8 +922,8 @@ export default function App() {
 
               {/* Selected stop + ETA (all routes at stop for KMB) */}
               {selectedStop && (
-                <div className="flex-shrink-0 px-3 py-2 bg-slate-900/50 flex items-center justify-between border-b border-slate-800">
-                  <div className="min-w-0">
+                <div className="flex-shrink-0 px-3 py-2 bg-slate-900/50 flex items-center justify-between border-b border-slate-800 gap-2">
+                  <div className="min-w-0 flex-1">
                     <div className="font-semibold text-sm truncate">
                       {lang === 'tc'
                         ? selectedStop.name_tc
@@ -552,13 +940,32 @@ export default function App() {
                     </div>
                   </div>
                   <button
+                    type="button"
+                    onClick={() => {
+                      toggleStop(selectedStop)
+                      showToast(
+                        isStopFav(selectedStop.operator, selectedStop.id)
+                          ? lang === 'tc'
+                            ? '已取消收藏'
+                            : 'Removed favourite'
+                          : lang === 'tc'
+                          ? '已加入收藏'
+                          : 'Saved to favourites'
+                      )
+                    }}
+                    className="text-lg flex-shrink-0 text-amber-400"
+                    title={lang === 'tc' ? '收藏車站' : 'Favourite stop'}
+                  >
+                    {isStopFav(selectedStop.operator, selectedStop.id) ? '★' : '☆'}
+                  </button>
+                  <button
                     onClick={() =>
                       loadEta(
                         selectedStop,
                         selectedStop.operator === 'CTB' ? ctbFocusRoute : null
                       )
                     }
-                    className="text-xs text-slate-400 hover:text-white flex-shrink-0 ml-2"
+                    className="text-xs text-slate-400 hover:text-white flex-shrink-0"
                   >
                     {lang === 'tc' ? '更新' : 'Refresh'}
                   </button>
@@ -581,13 +988,29 @@ export default function App() {
                       : 'Locate nearby stops, or switch to By route'}
                   </div>
                 ) : (
-                  <EtaList etas={etas} lang={lang} loading={etaLoading} />
+                  <EtaList
+                    etas={etas}
+                    lang={lang}
+                    loading={etaLoading}
+                    stopName={
+                      lang === 'tc'
+                        ? selectedStop.name_tc
+                        : selectedStop.name_en
+                    }
+                    onRemind={handleRemind}
+                  />
                 )}
               </div>
             </>
           )}
         </div>
       </main>
+
+      {toast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-slate-100 text-slate-900 text-sm shadow-lg max-w-[90%] text-center">
+          {toast}
+        </div>
+      )}
 
       <footer className="flex-shrink-0 text-center text-[10px] text-slate-500 py-1.5 border-t border-slate-800">
         Data: data.gov.hk · KMB · Citybus · MTR · Not affiliated

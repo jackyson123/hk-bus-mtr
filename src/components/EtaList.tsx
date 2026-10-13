@@ -5,9 +5,22 @@ interface Props {
   etas: EtaItem[]
   lang: Lang
   loading?: boolean
+  stopName?: string
+  onRemind?: (opts: {
+    route: string
+    dest: string
+    etaIso: string
+    minutesBefore: number
+  }) => void
 }
 
-export default function EtaList({ etas, lang, loading }: Props) {
+export default function EtaList({
+  etas,
+  lang,
+  loading,
+  stopName,
+  onRemind,
+}: Props) {
   if (loading) {
     return (
       <div className="space-y-2 p-3">
@@ -26,7 +39,6 @@ export default function EtaList({ etas, lang, loading }: Props) {
     )
   }
 
-  // Group by route
   const grouped = etas.reduce<Record<string, EtaItem[]>>((acc, e) => {
     const key = `${e.operator}-${e.route}`
     if (!acc[key]) acc[key] = []
@@ -38,6 +50,7 @@ export default function EtaList({ etas, lang, loading }: Props) {
     <div className="space-y-2 p-2">
       {Object.entries(grouped).map(([key, items]) => {
         const first = items[0]
+        const sorted = [...items].sort((a, b) => a.eta_seq - b.eta_seq).slice(0, 3)
         return (
           <div
             key={key}
@@ -58,14 +71,14 @@ export default function EtaList({ etas, lang, loading }: Props) {
                 → {lang === 'tc' ? first.dest_tc : first.dest_en}
               </span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {items
-                .sort((a, b) => a.eta_seq - b.eta_seq)
-                .slice(0, 3)
-                .map((e, i) => (
+            <div className="flex flex-col gap-2">
+              {sorted.map((e, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-2 flex-wrap"
+                >
                   <div
-                    key={i}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium tabular-nums ${
                       i === 0
                         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                         : 'bg-slate-700/60 text-slate-300'
@@ -78,8 +91,43 @@ export default function EtaList({ etas, lang, loading }: Props) {
                       </span>
                     ) : null}
                   </div>
-                ))}
+                  {onRemind && e.eta && (
+                    <div className="flex gap-1">
+                      {[3, 5, 10].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() =>
+                            onRemind({
+                              route: e.route,
+                              dest: lang === 'tc' ? e.dest_tc : e.dest_en,
+                              etaIso: e.eta!,
+                              minutesBefore: m,
+                            })
+                          }
+                          className="text-[10px] px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/25 hover:bg-amber-500/25"
+                          title={
+                            lang === 'tc'
+                              ? `到站前 ${m} 分鐘提醒`
+                              : `Remind ${m} min before`
+                          }
+                        >
+                          🔔{m}
+                          {lang === 'tc' ? '分' : 'm'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
+            {stopName && onRemind && (
+              <p className="text-[10px] text-slate-500 mt-2">
+                {lang === 'tc'
+                  ? '撳 🔔 設定到站前提醒（需允許通知）'
+                  : 'Tap 🔔 to set arrival reminder (needs notification permission)'}
+              </p>
+            )}
           </div>
         )
       })}
