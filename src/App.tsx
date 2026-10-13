@@ -495,7 +495,7 @@ export default function App() {
         )}
 
         {/* Content */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className={`flex-1 min-h-0 flex flex-col ${tab === 'mtr' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
           {tab === 'mtr' ? (
             <MtrPanel lang={lang} />
           ) : (

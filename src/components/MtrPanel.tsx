@@ -12,7 +12,7 @@ function formatArrival(t: MtrSchedule, lang: Lang): { main: string; sub: string 
   const ttnt = t.ttnt
   let main: string
   if (!Number.isFinite(ttnt)) {
-    main = lang === 'tc' ? '—' : '—'
+    main = '—'
   } else if (ttnt <= 0) {
     main = lang === 'tc' ? '即將到達' : 'Arriving'
   } else if (ttnt === 1) {
@@ -42,6 +42,7 @@ export default function MtrPanel({ lang }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
+  const [mapOpen, setMapOpen] = useState(false)
 
   const stations = MTR_STATIONS[line] || []
   const currentLine = MTR_LINES.find((l) => l.code === line)
@@ -82,112 +83,130 @@ export default function MtrPanel({ lang }: Props) {
     }
   }, [line])
 
-  // Infer direction labels from first train destinations
   const upLabel = useMemo(() => {
     if (up[0]?.dest) {
-      const name = stationDisplayName(up[0].dest, lang)
-      return lang === 'tc' ? `往 ${name}` : `To ${name}`
+      return lang === 'tc'
+        ? `往 ${stationDisplayName(up[0].dest, lang)}`
+        : `To ${stationDisplayName(up[0].dest, lang)}`
     }
     return lang === 'tc' ? '上行' : 'UP'
   }, [up, lang])
 
   const downLabel = useMemo(() => {
     if (down[0]?.dest) {
-      const name = stationDisplayName(down[0].dest, lang)
-      return lang === 'tc' ? `往 ${name}` : `To ${name}`
+      return lang === 'tc'
+        ? `往 ${stationDisplayName(down[0].dest, lang)}`
+        : `To ${stationDisplayName(down[0].dest, lang)}`
     }
     return lang === 'tc' ? '下行' : 'DOWN'
   }, [down, lang])
 
+  const lineStops: BusStop[] = useMemo(
+    () =>
+      stations
+        .filter((s) => STATION_COORDS[s.code])
+        .map((s) => {
+          const c = STATION_COORDS[s.code]
+          return {
+            id: s.code,
+            name_tc: s.name_tc,
+            name_en: s.name_en,
+            lat: c.lat,
+            lng: c.lng,
+            operator: 'MTR' as const,
+          }
+        }),
+    [stations]
+  )
+
   const renderTrains = (list: MtrSchedule[], title: string) => (
-    <div className="flex-1 min-w-0">
-      <div
-        className="text-sm font-semibold mb-2 px-1 flex items-center gap-2"
-        style={{ color: currentLine?.color || '#94a3b8' }}
+    <section className="w-full">
+      <h3
+        className="text-base font-bold mb-3 flex items-center gap-2"
+        style={{ color: currentLine?.color || '#57534e' }}
       >
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: currentLine?.color }} />
+        <span
+          className="w-3 h-3 rounded-full"
+          style={{ background: currentLine?.color }}
+        />
         {title}
-      </div>
+      </h3>
       {list.length === 0 ? (
-        <div className="rounded-xl bg-stone-50 border border-stone-200 px-4 py-6 text-center text-sm text-stone-400">
+        <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-stone-400 text-base">
           {lang === 'tc' ? '暫時沒有班次' : 'No trains right now'}
         </div>
       ) : (
-        <div className="space-y-2">
+        <ul className="space-y-3">
           {list.map((t, i) => {
             const destName = stationDisplayName(t.dest, lang)
             const { main, sub } = formatArrival(t, lang)
             const isNext = i === 0
             return (
-              <div
+              <li
                 key={`${t.direction}-${t.seq}-${i}`}
-                className={`rounded-xl px-4 py-3 border transition ${
+                className={`rounded-2xl px-4 py-4 border-2 ${
                   isNext
-                    ? 'bg-emerald-500/10 border-emerald-500/30'
-                    : 'bg-stone-100 border-stone-200'
+                    ? 'bg-emerald-50 border-emerald-500'
+                    : 'bg-white border-stone-200'
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-base truncate">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-xl leading-tight">
                       {lang === 'tc' ? '往' : 'To'} {destName}
-                    </div>
-                    <div className="text-xs text-stone-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    </p>
+                    <p className="mt-2 text-base text-stone-600">
                       {t.plat && (
-                        <span>
-                          {lang === 'tc' ? '月台' : 'Platform'}{' '}
-                          <span className="text-stone-800 font-medium">{t.plat}</span>
-                        </span>
+                        <>
+                          {lang === 'tc' ? '月台' : 'Plat'}{' '}
+                          <strong className="text-stone-900 text-lg">{t.plat}</strong>
+                          {'  ·  '}
+                        </>
                       )}
                       {sub && (
-                        <span>
+                        <>
                           {lang === 'tc' ? '預計' : 'ETA'}{' '}
-                          <span className="tabular-nums text-stone-800">{sub}</span>
-                        </span>
+                          <strong className="text-stone-900 text-lg tabular-nums">{sub}</strong>
+                        </>
                       )}
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div
-                      className={`text-lg font-bold tabular-nums leading-tight ${
-                        isNext ? 'text-emerald-300' : 'text-stone-800'
-                      }`}
-                    >
-                      {main}
-                    </div>
+                    </p>
                     {isNext && (
-                      <div className="text-[10px] text-emerald-400/80 mt-0.5">
+                      <span className="inline-block mt-2 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-600 text-white">
                         {lang === 'tc' ? '下一班' : 'Next'}
-                      </div>
+                      </span>
                     )}
                   </div>
+                  <div
+                    className={`text-right flex-shrink-0 ${
+                      isNext ? 'text-emerald-700' : 'text-stone-800'
+                    }`}
+                  >
+                    <p className="text-3xl font-black tabular-nums leading-none whitespace-nowrap">
+                      {main}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              </li>
             )
           })}
-        </div>
+        </ul>
       )}
-    </div>
+    </section>
   )
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Line picker */}
-      <div className="p-3 space-y-3 border-b border-stone-200">
-        <p className="text-[10px] text-stone-400 uppercase tracking-wider px-0.5">
-          {lang === 'tc' ? '① 選擇路線' : '① Choose line'}
-        </p>
-        <div className="flex flex-wrap gap-2">
+    <div className="pb-8">
+      {/* Sticky compact header */}
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-stone-200 px-3 pt-3 pb-2 space-y-2">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
           {MTR_LINES.map((l) => {
             const active = line === l.code
             return (
               <button
                 key={l.code}
                 onClick={() => setLine(l.code)}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold transition border ${
-                  active
-                    ? 'text-white border-transparent shadow-md'
-                    : 'bg-stone-100 text-stone-700 border-stone-200 hover:border-stone-400'
+                className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold border ${
+                  active ? 'text-white border-transparent' : 'bg-stone-50 text-stone-700 border-stone-200'
                 }`}
                 style={active ? { backgroundColor: l.color } : undefined}
               >
@@ -197,13 +216,10 @@ export default function MtrPanel({ lang }: Props) {
           })}
         </div>
 
-        <p className="text-[10px] text-stone-400 uppercase tracking-wider px-0.5">
-          {lang === 'tc' ? '② 選擇車站' : '② Choose station'}
-        </p>
         <select
           value={station}
           onChange={(e) => setStation(e.target.value)}
-          className="w-full bg-stone-100 border border-stone-200 rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold"
         >
           {stations.map((s) => (
             <option key={s.code} value={s.code}>
@@ -212,116 +228,84 @@ export default function MtrPanel({ lang }: Props) {
           ))}
         </select>
 
-        {/* Context banner */}
-        <div
-          className="rounded-xl px-3 py-2.5 text-sm flex items-center justify-between gap-2 border"
-          style={{
-            borderColor: (currentLine?.color || '#334155') + '66',
-            background: (currentLine?.color || '#334155') + '18',
-          }}
-        >
-          <div className="min-w-0">
-            <div className="font-semibold truncate">
-              {lang === 'tc' ? currentLine?.name_tc : currentLine?.name_en}
-              {' · '}
-              {lang === 'tc' ? currentStation?.name_tc : currentStation?.name_en}
-            </div>
-            <div className="text-[11px] text-stone-500 mt-0.5">
-              {lang === 'tc'
-                ? '以下為即將到站列車'
-                : 'Upcoming trains at this station'}
-              {updatedAt && (
-                <span className="ml-2 opacity-70">
-                  · {lang === 'tc' ? '更新' : 'Updated'} {updatedAt}
-                </span>
-              )}
-            </div>
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <div className="min-w-0 font-bold truncate">
+            {lang === 'tc' ? currentLine?.name_tc : currentLine?.name_en}
+            {' · '}
+            {lang === 'tc' ? currentStation?.name_tc : currentStation?.name_en}
+            {updatedAt && (
+              <span className="font-normal text-stone-400 text-xs ml-2">
+                {updatedAt}
+              </span>
+            )}
+            {isDelay && (
+              <span className="text-amber-600 text-xs ml-1">⚠</span>
+            )}
           </div>
-          {isDelay && (
-            <span className="flex-shrink-0 text-amber-400 text-xs font-medium">
-              ⚠ {lang === 'tc' ? '可能延誤' : 'Delay'}
-            </span>
-          )}
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={load}
+              className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs"
+            >
+              🔄
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapOpen((v) => !v)}
+              className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs font-medium"
+            >
+              {mapOpen
+                ? lang === 'tc'
+                  ? '收地圖'
+                  : 'Hide map'
+                : lang === 'tc'
+                ? '地圖'
+                : 'Map'}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Station map */}
-      {(() => {
-        const lineStops: BusStop[] = stations
-          .filter((s) => STATION_COORDS[s.code])
-          .map((s) => {
-            const c = STATION_COORDS[s.code]
-            return {
-              id: s.code,
-              name_tc: s.name_tc,
-              name_en: s.name_en,
-              lat: c.lat,
-              lng: c.lng,
-              operator: 'MTR' as const,
-            }
-          })
-        const selected = STATION_COORDS[station]
-        if (!lineStops.length) return null
-        return (
-          <div className="flex-shrink-0 border-b border-stone-200 h-44 md:h-52 relative">
-            <MapView
-              userLat={null}
-              userLng={null}
-              stops={lineStops}
-              selectedStopId={station}
-              onSelectStop={(s) => setStation(s.id)}
-              lang={lang}
-              height="100%"
-              fitToStops={true}
-              fitKey={`mtr-${line}-${station}`}
-              showRouteLine={lineStops.length > 1}
-            />
-            <div className="absolute bottom-2 left-2 z-[500] bg-white/90 text-[10px] text-stone-600 px-2 py-1 rounded-lg border border-stone-200 shadow-sm">
-              {lang === 'tc'
-                ? '地圖：本線車站（點站可切換）'
-                : 'Map: stations on this line (tap to switch)'}
-            </div>
-          </div>
-        )
-      })()}
+      {/* MAP optional — after controls, before trains, only if open */}
+      {mapOpen && lineStops.length > 0 && (
+        <div className="mx-3 mt-3 h-36 rounded-xl overflow-hidden border border-stone-200 relative">
+          <MapView
+            userLat={null}
+            userLng={null}
+            stops={lineStops}
+            selectedStopId={station}
+            onSelectStop={(s) => setStation(s.id)}
+            lang={lang}
+            height="100%"
+            fitToStops={true}
+            fitKey={`mtr-${line}-${station}`}
+            showRouteLine={lineStops.length > 1}
+          />
+        </div>
+      )}
 
-      {/* Train lists */}
-      <div className="flex-1 overflow-y-auto p-3">
+      {/* TRAINS — full natural height, page scrolls */}
+      <div className="px-3 pt-4 space-y-8">
         {loading && !up.length && !down.length ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 bg-stone-50 rounded-xl animate-pulse" />
+              <div key={i} className="h-24 bg-stone-100 rounded-2xl animate-pulse" />
             ))}
           </div>
         ) : error ? (
-          <div className="text-red-400 text-sm p-4 text-center rounded-xl bg-red-500/10 border border-red-500/20">
+          <div className="text-center text-red-600 p-6 bg-red-50 rounded-2xl">
             {error}
-            <button onClick={load} className="block mx-auto mt-2 text-stone-700 underline text-xs">
+            <button onClick={load} className="block mx-auto mt-2 underline text-sm text-stone-700">
               {lang === 'tc' ? '重試' : 'Retry'}
             </button>
           </div>
         ) : (
-          <div className="flex flex-col sm:flex-row gap-5">
+          <>
             {renderTrains(up, upLabel)}
             {renderTrains(down, downLabel)}
-          </div>
+          </>
         )}
-      </div>
-
-      <div className="p-2 text-center border-t border-stone-200">
-        <button
-          onClick={load}
-          disabled={loading}
-          className="text-xs text-stone-500 hover:text-stone-800 disabled:opacity-50 px-3 py-1"
-        >
-          {loading
-            ? lang === 'tc'
-              ? '更新中…'
-              : 'Refreshing…'
-            : lang === 'tc'
-            ? '🔄 手動更新'
-            : '🔄 Refresh'}
-        </button>
       </div>
     </div>
   )
