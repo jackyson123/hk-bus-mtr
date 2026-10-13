@@ -31,7 +31,7 @@ export default function App() {
   const [selectedStop, setSelectedStop] = useState<BusStop | null>(null)
   const [etas, setEtas] = useState<EtaItem[]>([])
   const [etaLoading, setEtaLoading] = useState(false)
-  const [mapExpanded, setMapExpanded] = useState(true)
+  const [mapExpanded, setMapExpanded] = useState(false)
 
   // Nearby / GPS
   const [allKmbStops, setAllKmbStops] = useState<BusStop[]>([])
@@ -239,7 +239,9 @@ export default function App() {
     setSelectedStop(null)
     setEtas([])
     setBusMode('route')
-    setMapExpanded(true)
+    if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+      setMapExpanded(true)
+    }
     try {
       const list = await searchRouteVariants(q)
       if (!list.length) {
@@ -281,8 +283,10 @@ export default function App() {
         setRouteError(null)
       }
       setRouteStops(stops)
-      // 地圖自動展開並對準該線
-      setMapExpanded(true)
+      // 桌面自動開地圖；手機保持收起以免壓住班次
+      if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+        setMapExpanded(true)
+      }
       setBusMode('route')
 
       // Auto-load clock ETAs for every stop on this route
@@ -450,8 +454,8 @@ export default function App() {
         {/* Map */}
         {tab === 'bus' && (
           <div
-            className={`map-panel relative border-b md:border-b-0 md:border-r border-stone-200 md:h-auto md:w-[45%] lg:w-[50%] ${
-              mapExpanded ? 'h-64' : 'h-10'
+            className={`map-panel relative border-b md:border-b-0 md:border-r border-stone-200 md:w-[45%] lg:w-[50%] md:min-h-0 md:self-stretch ${
+              mapExpanded ? 'h-40 md:h-auto md:flex-1' : 'h-11 md:h-auto md:flex-1'
             }`}
           >
             <button
@@ -495,13 +499,13 @@ export default function App() {
         )}
 
         {/* Content */}
-        <div className={`flex-1 min-h-0 flex flex-col ${tab === 'mtr' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
+        <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
           {tab === 'mtr' ? (
             <MtrPanel lang={lang} />
           ) : (
             <>
               {/* Mode tabs */}
-              <div className="flex-shrink-0 px-3 pt-3 grid grid-cols-4 gap-1.5">
+              <div className="flex-shrink-0 sticky top-0 z-10 bg-stone-50/95 backdrop-blur px-3 pt-3 pb-2 grid grid-cols-4 gap-1.5 border-b border-stone-100">
                 {(
                   [
                     ['route', lang === 'tc' ? '路線' : 'Route'],
@@ -641,7 +645,9 @@ export default function App() {
                         key={s.id}
                         onClick={() => {
                           handleSelectStop(s)
-                          setMapExpanded(true)
+                          if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+                            setMapExpanded(true)
+                          }
                         }}
                         className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
                           selectedStop?.id === s.id
@@ -676,7 +682,7 @@ export default function App() {
                   </div>
                 </div>
               ) : busMode === 'favorites' ? (
-                <div className="flex-shrink-0 p-3 space-y-3 border-b border-stone-200 max-h-56 overflow-y-auto">
+                <div className="flex-shrink-0 p-3 space-y-3 border-b border-stone-200">
                   <div>
                     <p className="text-[10px] text-stone-400 uppercase tracking-wider mb-1">
                       {lang === 'tc' ? '收藏車站' : 'Favourite stops'}
@@ -864,7 +870,7 @@ export default function App() {
 
               {/* Route stop list — pick a stop to see ALL buses at that stop */}
               {busMode === 'route' && (stopsLoadingRoute || routeStops.length > 0) && (
-                <div className="flex-shrink-0 border-b border-stone-200 max-h-64 overflow-y-auto">
+                <div className="flex-shrink-0 border-b border-stone-200">
                   {stopsLoadingRoute ? (
                     <div className="p-3 text-sm text-stone-500">
                       {lang === 'tc' ? '載入車站列表…' : 'Loading stops…'}
@@ -972,7 +978,7 @@ export default function App() {
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto">
+              <div className="pb-8">
                 {stopsLoading && busMode === 'nearby' ? (
                   <div className="p-6 text-center text-stone-500 text-sm">
                     {lang === 'tc' ? '載入站點資料中…' : 'Loading stops…'}
