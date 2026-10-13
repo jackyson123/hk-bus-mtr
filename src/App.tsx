@@ -14,6 +14,8 @@ import {
   loadRouteStops,
   formatEta,
   haversine,
+  getFullFare,
+  formatFare,
   type RouteVariant,
   type RouteStopItem,
 } from './lib/api'
@@ -41,6 +43,10 @@ export default function App() {
   const [stopsLoading, setStopsLoading] = useState(true)
   const [stopNameQuery, setStopNameQuery] = useState('')
   const [toast, setToast] = useState<string | null>(null)
+  const [nearbyEtas, setNearbyEtas] = useState<Record<string, EtaItem[]>>({})
+  const [nearbyEtaLoading, setNearbyEtaLoading] = useState(false)
+  const [routeFare, setRouteFare] = useState<number | null>(null)
+  const [nearestStopId, setNearestStopId] = useState<string | null>(null)
 
   // Route search
   const [routeQuery, setRouteQuery] = useState('')
@@ -115,6 +121,38 @@ export default function App() {
       .slice(0, 40)
     setNearby(list)
   }, [lat, lng, allKmbStops])
+
+  // 附近：每個站載入有咩巴士
+  useEffect(() => {
+    if (busMode !== 'nearby' || !nearby.length) {
+      setNearbyEtas({})
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      setNearbyEtaLoading(true)
+      const top = nearby.slice(0, 8)
+      const map: Record<string, EtaItem[]> = {}
+      await Promise.all(
+        top.map(async (s) => {
+          try {
+            const etas = await getKmbStopEta(s.id)
+            if (!cancelled) map[s.id] = etas.slice(0, 8)
+          } catch {
+            if (!cancelled) map[s.id] = []
+          }
+        })
+      )
+      if (!cancelled) {
+        setNearbyEtas({ ...map })
+        setNearbyEtaLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [busMode, nearby])
+
 
   // Load all-routes ETA at a stop (KMB stop-eta). For CTB stop, load single route if known.
   const loadEta = useCallback(
@@ -238,6 +276,8 @@ export default function App() {
     setRouteEtaBySeq({})
     setSelectedStop(null)
     setEtas([])
+    setRouteFare(null)
+    setNearestStopId(null)
     setBusMode('route')
     if (typeof window !== 'undefined' && window.innerWidth >= 768) {
       setMapExpanded(true)
@@ -283,11 +323,48 @@ export default function App() {
         setRouteError(null)
       }
       setRouteStops(stops)
-      // 桌面自動開地圖；手機保持收起以免壓住班次
       if (typeof window !== 'undefined' && window.innerWidth >= 768) {
         setMapExpanded(true)
       }
       setBusMode('route')
+
+      // GPS：跳到本線最近站並標示
+      let nearestId: string | null = null
+      if (lat != null && lng != null && stops.length) {
+        let best = Infinity
+        for (const s of stops) {
+          if (!s.lat || !s.lng) continue
+          const d = haversine(lat, lng, s.lat, s.lng)
+          if (d < best) {
+            best = d
+            nearestId = s.stopId
+          }
+        }
+        setNearestStopId(nearestId)
+        if (nearestId) {
+          const ns = stops.find((x) => x.stopId === nearestId)
+          if (ns) {
+            setSelectedStop({
+              id: ns.stopId,
+              name_tc: ns.name_tc,
+              name_en: ns.name_en,
+              lat: ns.lat,
+              lng: ns.lng,
+              operator: ns.operator,
+            })
+            setCtbFocusRoute(ns.operator === 'CTB' ? v.route : null)
+          }
+        }
+      } else {
+        setNearestStopId(null)
+      }
+
+      try {
+        const fare = await getFullFare(v.operator, v.route, v.bound)
+        setRouteFare(fare)
+      } catch {
+        setRouteFare(null)
+      }
 
       // Auto-load clock ETAs for every stop on this route
       if (v.operator === 'KMB') {
@@ -508,15 +585,18 @@ export default function App() {
               <div className="flex-shrink-0 sticky top-0 z-10 bg-stone-50/95 backdrop-blur px-3 pt-3 pb-2 grid grid-cols-4 gap-1.5 border-b border-stone-100">
                 {(
                   [
-                    ['route', lang === 'tc' ? '路線' : 'Route'],
-                    ['search', lang === 'tc' ? '站名' : 'Stop'],
                     ['nearby', lang === 'tc' ? '附近' : 'Near'],
+                    ['route', lang === 'tc' ? '路線' : 'Route'],
+                    ['search', lang === 'tc' ? '查站' : 'Stop'],
                     ['favorites', lang === 'tc' ? '收藏' : 'Fav'],
                   ] as const
                 ).map(([mode, label]) => (
                   <button
                     key={mode}
-                    onClick={() => setBusMode(mode)}
+                    onClick={() => {
+                      setBusMode(mode)
+                      if (mode === 'nearby') requestGeo()
+                    }}
                     className={`py-2 rounded-xl text-xs font-medium border transition ${
                       busMode === mode
                         ? 'bg-stone-800 border-stone-800 text-white'
@@ -838,33 +918,92 @@ export default function App() {
                   {!lat && !geoLoading && (
                     <button
                       onClick={requestGeo}
-                      className="w-full py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 text-sm"
+                      className="w-full py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-700 text-sm"
                     >
                       {lang === 'tc'
                         ? '點擊取得附近巴士站'
                         : 'Get nearby bus stops'}
                     </button>
                   )}
-                  {filteredNearby.length > 0 && (
-                    <div className="flex overflow-x-auto gap-2 pb-1">
-                      {filteredNearby.slice(0, 15).map((s) => (
+                  {nearbyEtaLoading && (
+                    <p className="text-xs text-stone-400">
+                      {lang === 'tc' ? '載入附近巴士…' : 'Loading nearby buses…'}
+                    </p>
+                  )}
+                  <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+                    {filteredNearby.slice(0, 8).map((s) => {
+                      const etas = nearbyEtas[s.id] || []
+                      // group by route
+                      const byRoute: Record<string, typeof etas> = {}
+                      for (const e of etas) {
+                        const k = `${e.operator}-${e.route}`
+                        if (!byRoute[k]) byRoute[k] = []
+                        byRoute[k].push(e)
+                      }
+                      return (
                         <button
                           key={s.id}
+                          type="button"
                           onClick={() => handleSelectStop(s)}
-                          className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs border transition ${
+                          className={`w-full text-left rounded-2xl border p-3 transition ${
                             selectedStop?.id === s.id
-                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                              : 'bg-stone-100 border-stone-200 text-stone-700'
+                              ? 'border-emerald-500 bg-emerald-50'
+                              : 'border-stone-200 bg-white hover:border-stone-300'
                           }`}
                         >
-                          {lang === 'tc' ? s.name_tc : s.name_en}
-                          <span className="ml-1 opacity-60">
-                            {Math.round(s.distance)}m
-                          </span>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="font-bold text-base truncate">
+                              {lang === 'tc' ? s.name_tc : s.name_en}
+                            </span>
+                            <span className="text-xs text-stone-500 flex-shrink-0">
+                              {Math.round(s.distance)}m
+                            </span>
+                          </div>
+                          {etas.length === 0 ? (
+                            <p className="text-sm text-stone-400">
+                              {nearbyEtaLoading
+                                ? '…'
+                                : lang === 'tc'
+                                ? '暫無到站'
+                                : 'No ETA'}
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {Object.values(byRoute)
+                                .slice(0, 5)
+                                .map((items) => {
+                                  const first = items[0]
+                                  const times = items
+                                    .slice(0, 2)
+                                    .map((e) => formatEta(e.eta, lang))
+                                    .join(' · ')
+                                  return (
+                                    <div
+                                      key={`${first.operator}-${first.route}`}
+                                      className="flex items-center gap-2 text-sm"
+                                    >
+                                      <span
+                                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white ${
+                                          first.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+                                        }`}
+                                      >
+                                        {first.route}
+                                      </span>
+                                      <span className="text-stone-500 truncate flex-1 text-xs">
+                                        → {lang === 'tc' ? first.dest_tc : first.dest_en}
+                                      </span>
+                                      <span className="font-semibold tabular-nums text-stone-800 flex-shrink-0">
+                                        {times}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                            </div>
+                          )}
                         </button>
-                      ))}
-                    </div>
-                  )}
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -877,43 +1016,67 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="p-2 space-y-1">
-                      <p className="px-1 text-[10px] text-stone-400 uppercase tracking-wider">
-                        {lang === 'tc'
-                          ? '各站到站時間（撳站可睇同站其他車）'
-                          : 'ETA per stop (tap for all routes at stop)'}
-                      </p>
+                      <div className="px-1 flex items-center justify-between gap-2 flex-wrap mb-1">
+                        <p className="text-[10px] text-stone-400 uppercase tracking-wider">
+                          {lang === 'tc'
+                            ? '各站到站（最近站已標示）'
+                            : 'Stops (nearest marked)'}
+                        </p>
+                        {routeFare != null && (
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                            {formatFare(routeFare, lang)}
+                          </span>
+                        )}
+                      </div>
+                      {nearestStopId && lat != null && (
+                        <p className="px-1 text-xs text-emerald-700 mb-1">
+                          {lang === 'tc'
+                            ? '📍 已跳至 GPS 最近站'
+                            : '📍 Jumped to nearest stop by GPS'}
+                        </p>
+                      )}
                       {routeStops.map((s) => {
                         const times = routeEtaBySeq[s.seq] || []
+                        const isNearest = nearestStopId === s.stopId
                         return (
                           <button
                             key={`${s.operator}-${s.stopId}-${s.seq}`}
                             onClick={() => handleSelectRouteStop(s)}
-                            className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
-                              selectedStop?.id === s.stopId
-                                ? 'bg-emerald-500/15 border border-emerald-500/30'
-                                : 'hover:bg-stone-100'
+                            className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2 transition ${
+                              isNearest
+                                ? 'bg-amber-50 border-2 border-amber-400'
+                                : selectedStop?.id === s.stopId
+                                ? 'bg-emerald-50 border border-emerald-400'
+                                : 'hover:bg-stone-100 border border-transparent'
                             }`}
                           >
                             <span className="text-stone-400 text-xs w-6 tabular-nums flex-shrink-0">
                               {s.seq}
                             </span>
-                            <span className="flex-1 min-w-0 truncate">
-                              {lang === 'tc' ? s.name_tc : s.name_en}
+                            <span className="flex-1 min-w-0">
+                              <span className="truncate block font-medium">
+                                {lang === 'tc' ? s.name_tc : s.name_en}
+                              </span>
+                              {isNearest && (
+                                <span className="text-[10px] font-bold text-amber-700">
+                                  {lang === 'tc' ? '最近' : 'Nearest'}
+                                </span>
+                              )}
                             </span>
                             <span className="flex-shrink-0 flex gap-1.5 tabular-nums text-xs font-medium">
                               {times.length === 0 ? (
                                 <span className="text-stone-400">—</span>
                               ) : (
-                                times.map((t, i) => (
+                                times.map((tm, i) => (
                                   <span
                                     key={i}
                                     className={
                                       i === 0
-                                        ? 'text-emerald-300'
+                                        ? 'text-emerald-700 font-bold'
                                         : 'text-stone-500'
                                     }
                                   >
-                                    {formatEta(t.eta, lang)}
+                                    {formatEta(tm.eta, lang)}
                                   </span>
                                 ))
                               )}

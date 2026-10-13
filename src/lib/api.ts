@@ -430,3 +430,45 @@ export function haversine(
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
+
+// ---------- Fares (TD open data slim map) ----------
+let fareCache: Record<string, number> | null = null
+
+export async function loadRouteFares(): Promise<Record<string, number>> {
+  if (fareCache) return fareCache
+  try {
+    const res = await fetch('/route-fares.json')
+    fareCache = await res.json()
+    return fareCache!
+  } catch {
+    fareCache = {}
+    return fareCache
+  }
+}
+
+/** Full adult fare if known. bound: O/I or outbound/inbound */
+export async function getFullFare(
+  operator: 'KMB' | 'CTB',
+  route: string,
+  bound?: string
+): Promise<number | null> {
+  const fares = await loadRouteFares()
+  const r = route.toUpperCase().trim()
+  const seq =
+    bound === 'I' || bound === 'inbound' ? '2' : bound === 'O' || bound === 'outbound' ? '1' : null
+  const keys = [
+    seq ? `${operator}|${r}|${seq}` : null,
+    `${operator}|${r}|1`,
+    `${operator}|${r}|2`,
+    `${operator}|${r}`,
+  ].filter(Boolean) as string[]
+  for (const k of keys) {
+    if (fares[k] != null) return fares[k]
+  }
+  return null
+}
+
+export function formatFare(n: number | null, lang: 'tc' | 'en'): string {
+  if (n == null) return lang === 'tc' ? '票價 —' : 'Fare —'
+  return lang === 'tc' ? `全程 $${n.toFixed(1)}` : `Full fare $${n.toFixed(1)}`
+}
