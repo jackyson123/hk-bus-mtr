@@ -25,7 +25,7 @@ export default function EtaList({
     return (
       <div className="space-y-2 p-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-14 bg-slate-800/60 rounded-xl animate-pulse" />
+          <div key={i} className="h-14 bg-stone-50 rounded-xl animate-pulse" />
         ))}
       </div>
     )
@@ -33,7 +33,7 @@ export default function EtaList({
 
   if (!etas.length) {
     return (
-      <div className="p-6 text-center text-slate-400 text-sm">
+      <div className="p-6 text-center text-stone-500 text-sm">
         {lang === 'tc' ? '暫時沒有到站資料' : 'No arrival data'}
       </div>
     )
@@ -54,7 +54,7 @@ export default function EtaList({
         return (
           <div
             key={key}
-            className="bg-slate-800/70 rounded-xl p-3 border border-slate-700/50"
+            className="bg-white rounded-xl p-3 border border-stone-200"
           >
             <div className="flex items-center gap-2 mb-2">
               <span
@@ -67,7 +67,7 @@ export default function EtaList({
                 {first.operator}
               </span>
               <span className="font-bold text-lg tracking-wide">{first.route}</span>
-              <span className="text-slate-400 text-sm truncate">
+              <span className="text-stone-500 text-sm truncate">
                 → {lang === 'tc' ? first.dest_tc : first.dest_en}
               </span>
             </div>
@@ -81,7 +81,7 @@ export default function EtaList({
                     className={`px-3 py-1.5 rounded-lg text-sm font-medium tabular-nums ${
                       i === 0
                         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-slate-700/60 text-slate-300'
+                        : 'bg-stone-200/80 text-stone-700'
                     }`}
                   >
                     {formatEta(e.eta, lang)}
@@ -122,7 +122,7 @@ export default function EtaList({
               ))}
             </div>
             {stopName && onRemind && (
-              <p className="text-[10px] text-slate-500 mt-2">
+              <p className="text-[10px] text-stone-400 mt-2">
                 {lang === 'tc'
                   ? '撳 🔔 設定到站前提醒（需允許通知）'
                   : 'Tap 🔔 to set arrival reminder (needs notification permission)'}

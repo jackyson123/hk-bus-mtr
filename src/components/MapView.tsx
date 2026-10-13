@@ -13,7 +13,7 @@ const userIcon = L.divIcon({
 
 const stopIcon = (op: string, selected?: boolean, seq?: number) => {
   const size = selected ? 22 : seq != null ? 20 : 14
-  const bg = op === 'KMB' ? '#E30613' : '#0066B3'
+  const bg = op === 'KMB' ? '#E30613' : op === 'CTB' ? '#0066B3' : '#9D2D2D'
   const border = selected ? '#34d399' : 'white'
   const label =
     seq != null

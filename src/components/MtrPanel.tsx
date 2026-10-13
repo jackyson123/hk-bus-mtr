@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { MTR_LINES, MTR_STATIONS, stationDisplayName } from '../lib/mtrData'
+import { MTR_LINES, MTR_STATIONS, stationDisplayName, STATION_COORDS } from '../lib/mtrData'
 import { getMtrSchedule } from '../lib/api'
-import type { Lang, MtrSchedule } from '../types'
+import MapView from './MapView'
+import type { Lang, MtrSchedule, BusStop } from '../types'
 
 interface Props {
   lang: Lang
@@ -108,7 +109,7 @@ export default function MtrPanel({ lang }: Props) {
         {title}
       </div>
       {list.length === 0 ? (
-        <div className="rounded-xl bg-slate-800/40 border border-slate-800 px-4 py-6 text-center text-sm text-slate-500">
+        <div className="rounded-xl bg-stone-50 border border-stone-200 px-4 py-6 text-center text-sm text-stone-400">
           {lang === 'tc' ? '暫時沒有班次' : 'No trains right now'}
         </div>
       ) : (
@@ -123,7 +124,7 @@ export default function MtrPanel({ lang }: Props) {
                 className={`rounded-xl px-4 py-3 border transition ${
                   isNext
                     ? 'bg-emerald-500/10 border-emerald-500/30'
-                    : 'bg-slate-800/50 border-slate-700/40'
+                    : 'bg-stone-100 border-stone-200'
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -131,17 +132,17 @@ export default function MtrPanel({ lang }: Props) {
                     <div className="font-semibold text-base truncate">
                       {lang === 'tc' ? '往' : 'To'} {destName}
                     </div>
-                    <div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    <div className="text-xs text-stone-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                       {t.plat && (
                         <span>
                           {lang === 'tc' ? '月台' : 'Platform'}{' '}
-                          <span className="text-slate-200 font-medium">{t.plat}</span>
+                          <span className="text-stone-800 font-medium">{t.plat}</span>
                         </span>
                       )}
                       {sub && (
                         <span>
                           {lang === 'tc' ? '預計' : 'ETA'}{' '}
-                          <span className="tabular-nums text-slate-200">{sub}</span>
+                          <span className="tabular-nums text-stone-800">{sub}</span>
                         </span>
                       )}
                     </div>
@@ -149,7 +150,7 @@ export default function MtrPanel({ lang }: Props) {
                   <div className="text-right flex-shrink-0">
                     <div
                       className={`text-lg font-bold tabular-nums leading-tight ${
-                        isNext ? 'text-emerald-300' : 'text-slate-200'
+                        isNext ? 'text-emerald-300' : 'text-stone-800'
                       }`}
                     >
                       {main}
@@ -172,8 +173,8 @@ export default function MtrPanel({ lang }: Props) {
   return (
     <div className="flex flex-col h-full">
       {/* Line picker */}
-      <div className="p-3 space-y-3 border-b border-slate-800">
-        <p className="text-[10px] text-slate-500 uppercase tracking-wider px-0.5">
+      <div className="p-3 space-y-3 border-b border-stone-200">
+        <p className="text-[10px] text-stone-400 uppercase tracking-wider px-0.5">
           {lang === 'tc' ? '① 選擇路線' : '① Choose line'}
         </p>
         <div className="flex flex-wrap gap-2">
@@ -186,7 +187,7 @@ export default function MtrPanel({ lang }: Props) {
                 className={`px-3 py-2 rounded-xl text-xs font-semibold transition border ${
                   active
                     ? 'text-white border-transparent shadow-md'
-                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:border-slate-500'
+                    : 'bg-stone-100 text-stone-700 border-stone-200 hover:border-stone-400'
                 }`}
                 style={active ? { backgroundColor: l.color } : undefined}
               >
@@ -196,13 +197,13 @@ export default function MtrPanel({ lang }: Props) {
           })}
         </div>
 
-        <p className="text-[10px] text-slate-500 uppercase tracking-wider px-0.5">
+        <p className="text-[10px] text-stone-400 uppercase tracking-wider px-0.5">
           {lang === 'tc' ? '② 選擇車站' : '② Choose station'}
         </p>
         <select
           value={station}
           onChange={(e) => setStation(e.target.value)}
-          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500"
+          className="w-full bg-stone-100 border border-stone-200 rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
         >
           {stations.map((s) => (
             <option key={s.code} value={s.code}>
@@ -225,7 +226,7 @@ export default function MtrPanel({ lang }: Props) {
               {' · '}
               {lang === 'tc' ? currentStation?.name_tc : currentStation?.name_en}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">
+            <div className="text-[11px] text-stone-500 mt-0.5">
               {lang === 'tc'
                 ? '以下為即將到站列車'
                 : 'Upcoming trains at this station'}
@@ -244,18 +245,58 @@ export default function MtrPanel({ lang }: Props) {
         </div>
       </div>
 
+      {/* Station map */}
+      {(() => {
+        const lineStops: BusStop[] = stations
+          .filter((s) => STATION_COORDS[s.code])
+          .map((s) => {
+            const c = STATION_COORDS[s.code]
+            return {
+              id: s.code,
+              name_tc: s.name_tc,
+              name_en: s.name_en,
+              lat: c.lat,
+              lng: c.lng,
+              operator: 'MTR' as const,
+            }
+          })
+        const selected = STATION_COORDS[station]
+        if (!lineStops.length) return null
+        return (
+          <div className="flex-shrink-0 border-b border-stone-200 h-44 md:h-52 relative">
+            <MapView
+              userLat={null}
+              userLng={null}
+              stops={lineStops}
+              selectedStopId={station}
+              onSelectStop={(s) => setStation(s.id)}
+              lang={lang}
+              height="100%"
+              fitToStops={true}
+              fitKey={`mtr-${line}-${station}`}
+              showRouteLine={lineStops.length > 1}
+            />
+            <div className="absolute bottom-2 left-2 z-[500] bg-white/90 text-[10px] text-stone-600 px-2 py-1 rounded-lg border border-stone-200 shadow-sm">
+              {lang === 'tc'
+                ? '地圖：本線車站（點站可切換）'
+                : 'Map: stations on this line (tap to switch)'}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Train lists */}
       <div className="flex-1 overflow-y-auto p-3">
         {loading && !up.length && !down.length ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 bg-slate-800/60 rounded-xl animate-pulse" />
+              <div key={i} className="h-16 bg-stone-50 rounded-xl animate-pulse" />
             ))}
           </div>
         ) : error ? (
           <div className="text-red-400 text-sm p-4 text-center rounded-xl bg-red-500/10 border border-red-500/20">
             {error}
-            <button onClick={load} className="block mx-auto mt-2 text-slate-300 underline text-xs">
+            <button onClick={load} className="block mx-auto mt-2 text-stone-700 underline text-xs">
               {lang === 'tc' ? '重試' : 'Retry'}
             </button>
           </div>
@@ -267,11 +308,11 @@ export default function MtrPanel({ lang }: Props) {
         )}
       </div>
 
-      <div className="p-2 text-center border-t border-slate-800/80">
+      <div className="p-2 text-center border-t border-stone-200">
         <button
           onClick={load}
           disabled={loading}
-          className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-50 px-3 py-1"
+          className="text-xs text-stone-500 hover:text-stone-800 disabled:opacity-50 px-3 py-1"
         >
           {loading
             ? lang === 'tc'
