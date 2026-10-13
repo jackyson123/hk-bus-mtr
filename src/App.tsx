@@ -47,6 +47,8 @@ export default function App() {
   const [nearbyEtaLoading, setNearbyEtaLoading] = useState(false)
   const [routeFare, setRouteFare] = useState<number | null>(null)
   const [nearestStopId, setNearestStopId] = useState<string | null>(null)
+  /** 路線模式下：是否展開「此站所有路線」 */
+  const [showAllAtStop, setShowAllAtStop] = useState(false)
 
   // Route search
   const [routeQuery, setRouteQuery] = useState('')
@@ -183,16 +185,18 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (selectedStop) {
-      loadEta(
-        selectedStop,
-        selectedStop.operator === 'CTB' ? ctbFocusRoute : null
-      )
-    }
-  }, [selectedStop, loadEta, ctbFocusRoute])
+    if (!selectedStop) return
+    // 路線模式未撳「其他車」就唔載入同站全部路線
+    if (busMode === 'route' && !showAllAtStop) return
+    loadEta(
+      selectedStop,
+      selectedStop.operator === 'CTB' ? ctbFocusRoute : null
+    )
+  }, [selectedStop, loadEta, ctbFocusRoute, busMode, showAllAtStop])
 
   useEffect(() => {
     if (!selectedStop) return
+    if (busMode === 'route' && !showAllAtStop) return
     const t = setInterval(() => {
       loadEta(
         selectedStop,
@@ -200,7 +204,7 @@ export default function App() {
       )
     }, 30000)
     return () => clearInterval(t)
-  }, [selectedStop, loadEta, ctbFocusRoute])
+  }, [selectedStop, loadEta, ctbFocusRoute, busMode, showAllAtStop])
 
   const filteredNearby = useMemo(() => {
     if (!nearbyFilter.trim()) return nearby
@@ -257,6 +261,8 @@ export default function App() {
       operator: item.operator,
     }
     setSelectedStop(stop)
+    setNearestStopId(item.stopId)
+    setShowAllAtStop(false)
     if (item.operator === 'CTB' && selectedVariant) {
       setCtbFocusRoute(selectedVariant.route)
     } else {
@@ -278,6 +284,7 @@ export default function App() {
     setEtas([])
     setRouteFare(null)
     setNearestStopId(null)
+    setShowAllAtStop(false)
     setBusMode('route')
     if (typeof window !== 'undefined' && window.innerWidth >= 768) {
       setMapExpanded(true)
@@ -341,20 +348,9 @@ export default function App() {
           }
         }
         setNearestStopId(nearestId)
-        if (nearestId) {
-          const ns = stops.find((x) => x.stopId === nearestId)
-          if (ns) {
-            setSelectedStop({
-              id: ns.stopId,
-              name_tc: ns.name_tc,
-              name_en: ns.name_en,
-              lat: ns.lat,
-              lng: ns.lng,
-              operator: ns.operator,
-            })
-            setCtbFocusRoute(ns.operator === 'CTB' ? v.route : null)
-          }
-        }
+        // 路線模式只標示最近站，唔自動開「此站所有路線」
+        setSelectedStop(null)
+        setEtas([])
       } else {
         setNearestStopId(null)
       }
@@ -1081,6 +1077,18 @@ export default function App() {
                                 ))
                               )}
                             </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleSelectRouteStop(s)
+                                setShowAllAtStop(true)
+                              }}
+                              className="flex-shrink-0 text-[10px] px-1.5 py-1 rounded bg-stone-200 text-stone-600 font-medium"
+                            >
+                              {lang === 'tc' ? '其他車' : 'Other'}
+                            </span>
                           </button>
                         )
                       })}
@@ -1089,8 +1097,8 @@ export default function App() {
                 </div>
               )}
 
-              {/* Selected stop + ETA (all routes at stop for KMB) */}
-              {selectedStop && (
+              {/* Selected stop + ETA：附近/查站/收藏 常顯；路線模式要撳「同站其他車」先顯 */}
+              {selectedStop && (busMode !== 'route' || showAllAtStop) && (
                 <div className="flex-shrink-0 px-3 py-2 bg-stone-100/80 flex items-center justify-between border-b border-stone-200 gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-sm truncate">
@@ -1146,15 +1154,21 @@ export default function App() {
                   <div className="p-6 text-center text-stone-500 text-sm">
                     {lang === 'tc' ? '載入站點資料中…' : 'Loading stops…'}
                   </div>
+                ) : busMode === 'route' && !showAllAtStop ? (
+                  <div className="p-4 text-center text-stone-400 text-sm">
+                    {routeStops.length
+                      ? lang === 'tc'
+                        ? '上面係本線各站到站時間。撳站旁「其他車」可睇同站其他路線。'
+                        : 'Above: this route’s stops. Tap “Other” for all routes at a stop.'
+                      : lang === 'tc'
+                      ? '輸入路線 → 選方向'
+                      : 'Enter route → pick direction'}
+                  </div>
                 ) : !selectedStop ? (
                   <div className="p-6 text-center text-stone-400 text-sm">
-                    {busMode === 'route'
-                      ? lang === 'tc'
-                        ? '輸入路線 → 選方向 → 選車站'
-                        : 'Enter route → pick direction → pick stop'
-                      : lang === 'tc'
-                      ? '用定位選附近站，或切換「輸入路線」'
-                      : 'Locate nearby stops, or switch to By route'}
+                    {lang === 'tc'
+                      ? '用定位選附近站，或切換「查站」'
+                      : 'Locate nearby, or use Stop search'}
                   </div>
                 ) : (
                   <EtaList
