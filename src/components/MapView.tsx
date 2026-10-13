@@ -185,7 +185,7 @@ export default function MapView({
                     : ''}
                 </div>
                 {selectedStopId === s.id && (
-                  <div className="text-xs text-emerald-400 mt-1">
+                  <div className="text-xs text-emerald-800 mt-1">
                     {lang === 'tc' ? '已選取' : 'Selected'}
                   </div>
                 )}

@@ -132,7 +132,7 @@ export default function MtrPanel({ lang }: Props) {
         {title}
       </h3>
       {list.length === 0 ? (
-        <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-stone-400 text-base">
+        <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-8 text-center text-stone-600 text-base">
           {lang === 'tc' ? '暫時沒有班次' : 'No trains right now'}
         </div>
       ) : (
@@ -234,7 +234,7 @@ export default function MtrPanel({ lang }: Props) {
             {' · '}
             {lang === 'tc' ? currentStation?.name_tc : currentStation?.name_en}
             {updatedAt && (
-              <span className="font-normal text-stone-400 text-xs ml-2">
+              <span className="font-normal text-stone-600 text-xs ml-2">
                 {updatedAt}
               </span>
             )}

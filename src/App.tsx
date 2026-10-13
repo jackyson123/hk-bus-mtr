@@ -596,7 +596,7 @@ export default function App() {
                     className={`py-2 rounded-xl text-xs font-medium border transition ${
                       busMode === mode
                         ? 'bg-stone-800 border-stone-800 text-white'
-                        : 'bg-white border-stone-200 text-stone-500'
+                        : 'bg-white border-stone-200 text-stone-700'
                     }`}
                   >
                     {label}
@@ -712,7 +712,7 @@ export default function App() {
                   )}
                   <div className="max-h-48 overflow-y-auto space-y-1">
                     {stopNameQuery.trim() && stopNameResults.length === 0 && !stopsLoading && (
-                      <p className="text-xs text-stone-400 py-2">
+                      <p className="text-xs text-stone-600 py-2">
                         {lang === 'tc' ? '找不到相關車站' : 'No matching stops'}
                       </p>
                     )}
@@ -760,11 +760,11 @@ export default function App() {
               ) : busMode === 'favorites' ? (
                 <div className="flex-shrink-0 p-3 space-y-3 border-b border-stone-200">
                   <div>
-                    <p className="text-[10px] text-stone-400 uppercase tracking-wider mb-1">
+                    <p className="text-[10px] text-stone-600 uppercase tracking-wider mb-1">
                       {lang === 'tc' ? '收藏車站' : 'Favourite stops'}
                     </p>
                     {favStops.length === 0 ? (
-                      <p className="text-xs text-stone-400">
+                      <p className="text-xs text-stone-600">
                         {lang === 'tc'
                           ? '未有收藏。喺站名／附近／路線選站後撳 ★'
                           : 'None yet. Tap ★ on a stop to save.'}
@@ -808,11 +808,11 @@ export default function App() {
                     )}
                   </div>
                   <div>
-                    <p className="text-[10px] text-stone-400 uppercase tracking-wider mb-1">
+                    <p className="text-[10px] text-stone-600 uppercase tracking-wider mb-1">
                       {lang === 'tc' ? '收藏路線' : 'Favourite routes'}
                     </p>
                     {favRoutes.length === 0 ? (
-                      <p className="text-xs text-stone-400">
+                      <p className="text-xs text-stone-600">
                         {lang === 'tc'
                           ? '未有收藏。選路線方向後撳 ★'
                           : 'None yet. Tap ★ on a route variant.'}
@@ -868,7 +868,7 @@ export default function App() {
                   </div>
                   {reminders.length > 0 && (
                     <div>
-                      <p className="text-[10px] text-stone-400 uppercase tracking-wider mb-1">
+                      <p className="text-[10px] text-stone-600 uppercase tracking-wider mb-1">
                         {lang === 'tc' ? '已設定提醒' : 'Active reminders'}
                       </p>
                       {reminders.map((r) => (
@@ -881,7 +881,7 @@ export default function App() {
                           </span>
                           <button
                             type="button"
-                            className="text-stone-400"
+                            className="text-stone-600"
                             onClick={() => cancelReminder(r.id)}
                           >
                             ✕
@@ -922,7 +922,7 @@ export default function App() {
                     </button>
                   )}
                   {nearbyEtaLoading && (
-                    <p className="text-xs text-stone-400">
+                    <p className="text-xs text-stone-600">
                       {lang === 'tc' ? '載入附近巴士…' : 'Loading nearby buses…'}
                     </p>
                   )}
@@ -951,12 +951,12 @@ export default function App() {
                             <span className="font-bold text-base truncate">
                               {lang === 'tc' ? s.name_tc : s.name_en}
                             </span>
-                            <span className="text-xs text-stone-500 flex-shrink-0">
+                            <span className="text-xs text-stone-700 flex-shrink-0 font-medium">
                               {Math.round(s.distance)}m
                             </span>
                           </div>
                           {etas.length === 0 ? (
-                            <p className="text-sm text-stone-400">
+                            <p className="text-sm text-stone-600">
                               {nearbyEtaLoading
                                 ? '…'
                                 : lang === 'tc'
@@ -985,7 +985,7 @@ export default function App() {
                                       >
                                         {first.route}
                                       </span>
-                                      <span className="text-stone-500 truncate flex-1 text-xs">
+                                      <span className="text-stone-700 truncate flex-1 text-xs">
                                         → {lang === 'tc' ? first.dest_tc : first.dest_en}
                                       </span>
                                       <span className="font-semibold tabular-nums text-stone-800 flex-shrink-0">
@@ -1013,7 +1013,7 @@ export default function App() {
                   ) : (
                     <div className="p-2 space-y-1">
                       <div className="px-1 flex items-center justify-between gap-2 flex-wrap mb-1">
-                        <p className="text-[10px] text-stone-400 uppercase tracking-wider">
+                        <p className="text-[10px] text-stone-600 uppercase tracking-wider">
                           {lang === 'tc'
                             ? '各站到站（最近站已標示）'
                             : 'Stops (nearest marked)'}
@@ -1046,7 +1046,7 @@ export default function App() {
                                 : 'hover:bg-stone-100 border border-transparent'
                             }`}
                           >
-                            <span className="text-stone-400 text-xs w-6 tabular-nums flex-shrink-0">
+                            <span className="text-stone-600 text-xs w-6 tabular-nums flex-shrink-0 font-medium">
                               {s.seq}
                             </span>
                             <span className="flex-1 min-w-0">
@@ -1061,7 +1061,7 @@ export default function App() {
                             </span>
                             <span className="flex-shrink-0 flex gap-1.5 tabular-nums text-xs font-medium">
                               {times.length === 0 ? (
-                                <span className="text-stone-400">—</span>
+                                <span className="text-stone-600 font-medium">—</span>
                               ) : (
                                 times.map((tm, i) => (
                                   <span
@@ -1155,7 +1155,7 @@ export default function App() {
                     {lang === 'tc' ? '載入站點資料中…' : 'Loading stops…'}
                   </div>
                 ) : busMode === 'route' && !showAllAtStop ? (
-                  <div className="p-4 text-center text-stone-400 text-sm">
+                  <div className="p-4 text-center text-stone-600 text-sm">
                     {routeStops.length
                       ? lang === 'tc'
                         ? '上面係本線各站到站時間。撳站旁「其他車」可睇同站其他路線。'
@@ -1165,7 +1165,7 @@ export default function App() {
                       : 'Enter route → pick direction'}
                   </div>
                 ) : !selectedStop ? (
-                  <div className="p-6 text-center text-stone-400 text-sm">
+                  <div className="p-6 text-center text-stone-600 text-sm">
                     {lang === 'tc'
                       ? '用定位選附近站，或切換「查站」'
                       : 'Locate nearby, or use Stop search'}
@@ -1195,7 +1195,7 @@ export default function App() {
         </div>
       )}
 
-      <footer className="flex-shrink-0 text-center text-[10px] text-stone-400 py-1.5 border-t border-stone-200">
+      <footer className="flex-shrink-0 text-center text-[10px] text-stone-600 py-1.5 border-t border-stone-200">
         Data: data.gov.hk · KMB · Citybus · MTR · Not affiliated
       </footer>
     </div>
