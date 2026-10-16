@@ -13,7 +13,7 @@ const userIcon = L.divIcon({
 
 const stopIcon = (op: string, selected?: boolean, seq?: number) => {
   const size = selected ? 22 : seq != null ? 20 : 14
-  const bg = op === 'KMB' ? '#E30613' : op === 'CTB' ? '#0066B3' : '#9D2D2D'
+  const bg = op === 'KMB' ? '#E30613' : '#0066B3'
   const border = selected ? '#34d399' : 'white'
   const label =
     seq != null
@@ -126,8 +126,8 @@ export default function MapView({
         attributionControl={false}
       >
         <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; OSM &copy; CARTO'
         />
 
         {fitToStops && stops.length > 0 && (
@@ -185,7 +185,7 @@ export default function MapView({
                     : ''}
                 </div>
                 {selectedStopId === s.id && (
-                  <div className="text-xs text-emerald-800 mt-1">
+                  <div className="text-xs text-emerald-400 mt-1">
                     {lang === 'tc' ? '已選取' : 'Selected'}
                   </div>
                 )}
