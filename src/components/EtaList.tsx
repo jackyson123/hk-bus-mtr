@@ -25,7 +25,7 @@ export default function EtaList({
     return (
       <div className="space-y-2 p-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-14 bg-slate-800/60 rounded-xl animate-pulse" />
+          <div key={i} className="h-14 bg-stone-50 rounded-xl animate-pulse" />
         ))}
       </div>
     )
@@ -33,7 +33,7 @@ export default function EtaList({
 
   if (!etas.length) {
     return (
-      <div className="p-6 text-center text-slate-400 text-sm">
+      <div className="p-6 text-center text-stone-500 text-sm">
         {lang === 'tc' ? '暫時沒有到站資料' : 'No arrival data'}
       </div>
     )
@@ -54,7 +54,7 @@ export default function EtaList({
         return (
           <div
             key={key}
-            className="bg-slate-800/70 rounded-xl p-3 border border-slate-700/50"
+            className="bg-white rounded-xl p-3 border border-stone-200"
           >
             <div className="flex items-center gap-2 mb-2">
               <span
@@ -67,7 +67,7 @@ export default function EtaList({
                 {first.operator}
               </span>
               <span className="font-bold text-lg tracking-wide">{first.route}</span>
-              <span className="text-slate-400 text-sm truncate">
+              <span className="text-stone-700 text-sm truncate">
                 → {lang === 'tc' ? first.dest_tc : first.dest_en}
               </span>
             </div>
@@ -80,13 +80,13 @@ export default function EtaList({
                   <div
                     className={`px-3 py-1.5 rounded-lg text-sm font-medium tabular-nums ${
                       i === 0
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-slate-700/60 text-slate-300'
+                        ? 'bg-emerald-100 text-emerald-900 border border-emerald-600 font-bold'
+                        : 'bg-stone-100 text-stone-900 border border-stone-300 font-semibold'
                     }`}
                   >
                     {formatEta(e.eta, lang)}
                     {e.rmk_tc || e.rmk_en ? (
-                      <span className="ml-1 text-xs opacity-70">
+                      <span className="ml-1 text-xs text-stone-600">
                         ({lang === 'tc' ? e.rmk_tc : e.rmk_en})
                       </span>
                     ) : null}
@@ -105,7 +105,7 @@ export default function EtaList({
                               minutesBefore: m,
                             })
                           }
-                          className="text-[10px] px-2 py-1 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/25 hover:bg-amber-500/25"
+                          className="text-[10px] px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-400 hover:bg-amber-200 font-medium"
                           title={
                             lang === 'tc'
                               ? `到站前 ${m} 分鐘提醒`
@@ -122,7 +122,7 @@ export default function EtaList({
               ))}
             </div>
             {stopName && onRemind && (
-              <p className="text-[10px] text-slate-500 mt-2">
+              <p className="text-[10px] text-stone-600 mt-2">
                 {lang === 'tc'
                   ? '撳 🔔 設定到站前提醒（需允許通知）'
                   : 'Tap 🔔 to set arrival reminder (needs notification permission)'}

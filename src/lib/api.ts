@@ -384,9 +384,11 @@ export async function getMtrSchedule(
   const parse = (arr: any[] = [], dir: 'UP' | 'DOWN'): MtrSchedule[] =>
     (arr || []).map((t, i) => ({
       dest: t.dest || t.dest_tc || '',
-      time: t.ttnt || t.time || '-',
-      plat: t.plat || '',
-      seq: i + 1,
+      destName: t.dest || '',
+      time: t.time || '',
+      ttnt: Number(t.ttnt ?? NaN),
+      plat: String(t.plat ?? ''),
+      seq: Number(t.seq) || i + 1,
       direction: dir,
     }))
 
@@ -427,4 +429,87 @@ export function haversine(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+// ---------- Fares (TD open data slim map) ----------
+let fareCache: Record<string, number> | null = null
+
+export async function loadRouteFares(): Promise<Record<string, number>> {
+  if (fareCache) return fareCache
+  try {
+    const res = await fetch('/route-fares.json')
+    fareCache = await res.json()
+    return fareCache!
+  } catch {
+    fareCache = {}
+    return fareCache
+  }
+}
+
+/** Full adult fare if known. bound: O/I or outbound/inbound */
+export async function getFullFare(
+  operator: 'KMB' | 'CTB',
+  route: string,
+  bound?: string
+): Promise<number | null> {
+  const fares = await loadRouteFares()
+  const r = route.toUpperCase().trim()
+  const seq =
+    bound === 'I' || bound === 'inbound' ? '2' : bound === 'O' || bound === 'outbound' ? '1' : null
+  const keys = [
+    seq ? `${operator}|${r}|${seq}` : null,
+    `${operator}|${r}|1`,
+    `${operator}|${r}|2`,
+    `${operator}|${r}`,
+  ].filter(Boolean) as string[]
+  for (const k of keys) {
+    if (fares[k] != null) return fares[k]
+  }
+  return null
+}
+
+export function formatFare(n: number | null, lang: 'tc' | 'en'): string {
+  if (n == null) return lang === 'tc' ? '票價 —' : 'Fare —'
+  return lang === 'tc' ? `全程 $${n.toFixed(1)}` : `Full fare $${n.toFixed(1)}`
+}
+
+
+// ---------- Sectional fares ----------
+let sectionFareCache: Record<string, number[]> | null = null
+
+export async function loadSectionFares(): Promise<Record<string, number[]>> {
+  if (sectionFareCache) return sectionFareCache
+  try {
+    const res = await fetch('/route-section-fares.json')
+    sectionFareCache = await res.json()
+    return sectionFareCache!
+  } catch {
+    sectionFareCache = {}
+    return sectionFareCache
+  }
+}
+
+/** Fares by boarding stop index (0-based, aligned with route stop order). */
+export async function getSectionFares(
+  operator: 'KMB' | 'CTB',
+  route: string,
+  bound?: string,
+  serviceType?: string
+): Promise<number[] | null> {
+  const data = await loadSectionFares()
+  const r = route.toUpperCase().trim()
+  let b = (bound || '').toUpperCase()
+  if (b === 'OUTBOUND' || b === '1') b = 'O'
+  if (b === 'INBOUND' || b === '2') b = 'I'
+  const st = String(serviceType || '1')
+  const keys = [
+    `${operator}|${r}|${b}|${st}`,
+    `${operator}|${r}|${b}`,
+    `${operator}|${r}||${st}`,
+    `${operator}|${r}|`,
+  ]
+  for (const k of keys) {
+    if (data[k]?.length) return data[k]
+  }
+  return null
 }

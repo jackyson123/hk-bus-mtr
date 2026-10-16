@@ -49,8 +49,10 @@ export interface MtrStation {
 }
 
 export interface MtrSchedule {
-  dest: string
-  time: string
+  dest: string       // station code e.g. TUC
+  destName: string   // display name
+  time: string       // ISO-ish or raw
+  ttnt: number       // minutes until arrival
   plat: string
   seq: number
   direction: 'UP' | 'DOWN'
