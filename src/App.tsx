@@ -158,6 +158,45 @@ export default function App() {
     }
   }, [busMode, nearby])
 
+  // 路線模式：定時自動更新各站到站（唔使手動）
+  useEffect(() => {
+    if (busMode !== 'route' || !selectedVariant || !routeStops.length) return
+    let cancelled = false
+    const refresh = async () => {
+      const v = selectedVariant
+      try {
+        if (v.operator === 'KMB') {
+          const all = await getKmbRouteEta(v.route, v.service_type)
+          const wantDir = v.bound === 'I' ? 'I' : 'O'
+          const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
+          for (const g of all) {
+            if (g.dir && g.dir !== wantDir) continue
+            map[g.seq] = g.etas.slice(0, 3).map((e) => ({
+              eta: e.eta,
+              eta_seq: e.eta_seq,
+            }))
+          }
+          if (!Object.keys(map).length) {
+            for (const g of all) {
+              map[g.seq] = g.etas.slice(0, 3).map((e) => ({
+                eta: e.eta,
+                eta_seq: e.eta_seq,
+              }))
+            }
+          }
+          if (!cancelled && Object.keys(map).length) setRouteEtaBySeq(map)
+        }
+      } catch {
+        /* will try next interval */
+      }
+    }
+    const t = setInterval(refresh, 25000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [busMode, selectedVariant, routeStops.length])
+
 
   // Load all-routes ETA at a stop (KMB stop-eta). For CTB stop, load single route if known.
   const loadEta = useCallback(
@@ -384,50 +423,59 @@ export default function App() {
         })
       }, 350)
 
-      // Auto-load clock ETAs for every stop on this route
-      if (v.operator === 'KMB') {
+      // 自動載入各站到站時間，失敗會自動重試
+      const loadRouteEtas = async (): Promise<boolean> => {
         try {
-          const all = await getKmbRouteEta(v.route, v.service_type)
-          const wantDir = v.bound === 'I' ? 'I' : 'O'
-          const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
-          for (const g of all) {
-            if (g.dir && g.dir !== wantDir) continue
-            map[g.seq] = g.etas.slice(0, 3).map((e) => ({
-              eta: e.eta,
-              eta_seq: e.eta_seq,
-            }))
-          }
-          if (!Object.keys(map).length) {
+          if (v.operator === 'KMB') {
+            const all = await getKmbRouteEta(v.route, v.service_type)
+            const wantDir = v.bound === 'I' ? 'I' : 'O'
+            const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
             for (const g of all) {
+              if (g.dir && g.dir !== wantDir) continue
               map[g.seq] = g.etas.slice(0, 3).map((e) => ({
                 eta: e.eta,
                 eta_seq: e.eta_seq,
               }))
             }
-          }
-          setRouteEtaBySeq(map)
-        } catch (e) {
-          console.error('route-eta failed', e)
-        }
-      } else {
-        const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
-        const batch = stops.slice(0, 25)
-        await Promise.all(
-          batch.map(async (s) => {
-            try {
-              const etas = await getCtbEta(s.stopId, v.route)
-              if (etas.length) {
-                map[s.seq] = etas.slice(0, 3).map((e) => ({
+            if (!Object.keys(map).length) {
+              for (const g of all) {
+                map[g.seq] = g.etas.slice(0, 3).map((e) => ({
                   eta: e.eta,
                   eta_seq: e.eta_seq,
                 }))
               }
-            } catch {
-              /* ignore */
             }
-          })
-        )
-        setRouteEtaBySeq(map)
+            setRouteEtaBySeq(map)
+            return Object.keys(map).length > 0
+          }
+          const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
+          const batch = stops.slice(0, 30)
+          await Promise.all(
+            batch.map(async (s) => {
+              try {
+                const etas = await getCtbEta(s.stopId, v.route)
+                if (etas.length) {
+                  map[s.seq] = etas.slice(0, 3).map((e) => ({
+                    eta: e.eta,
+                    eta_seq: e.eta_seq,
+                  }))
+                }
+              } catch {
+                /* ignore */
+              }
+            })
+          )
+          setRouteEtaBySeq(map)
+          return Object.keys(map).length > 0
+        } catch (e) {
+          console.error('route-eta failed', e)
+          return false
+        }
+      }
+      let ok = await loadRouteEtas()
+      for (let attempt = 0; !ok && attempt < 3; attempt++) {
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
+        ok = await loadRouteEtas()
       }
     } catch (e: any) {
       setRouteError(e.message || 'Failed to load stops')
@@ -1119,53 +1167,21 @@ export default function App() {
                             </button>
                             <div className="pl-8 flex flex-wrap items-center gap-2">
                               {times.length === 0 ? (
-                                <span className="text-stone-600 text-xs">—</span>
+                                <span className="text-stone-500 text-xs">
+                                  {lang === 'tc' ? '載入中…' : 'Loading…'}
+                                </span>
                               ) : (
                                 times.map((tm, i) => (
-                                  <div
+                                  <span
                                     key={i}
-                                    className="flex items-center gap-1"
+                                    className={`tabular-nums text-sm font-bold px-2 py-0.5 rounded-md ${
+                                      i === 0
+                                        ? 'bg-emerald-100 text-emerald-900'
+                                        : 'bg-stone-100 text-stone-800'
+                                    }`}
                                   >
-                                    <span
-                                      className={`tabular-nums text-sm font-bold ${
-                                        i === 0
-                                          ? 'text-emerald-800'
-                                          : 'text-stone-700'
-                                      }`}
-                                    >
-                                      {formatEta(tm.eta, lang)}
-                                    </span>
-                                    {tm.eta && selectedVariant && (
-                                      <div className="flex gap-0.5">
-                                        {[3, 5, 10].map((m) => (
-                                          <button
-                                            key={m}
-                                            type="button"
-                                            className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300"
-                                            title={
-                                              lang === 'tc'
-                                                ? `到站前 ${m} 分鐘提醒`
-                                                : `Remind ${m} min before`
-                                            }
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              handleRemind({
-                                                route: selectedVariant.route,
-                                                dest:
-                                                  lang === 'tc'
-                                                    ? selectedVariant.dest_tc
-                                                    : selectedVariant.dest_en,
-                                                etaIso: tm.eta!,
-                                                minutesBefore: m,
-                                              })
-                                            }}
-                                          >
-                                            🔔{m}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
+                                    {formatEta(tm.eta, lang)}
+                                  </span>
                                 ))
                               )}
                             </div>

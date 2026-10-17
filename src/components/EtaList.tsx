@@ -105,7 +105,7 @@ export default function EtaList({
                               minutesBefore: m,
                             })
                           }
-                          className="text-[10px] px-2 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-400 hover:bg-amber-200 font-medium"
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 hover:bg-stone-200"
                           title={
                             lang === 'tc'
                               ? `到站前 ${m} 分鐘提醒`
@@ -123,9 +123,7 @@ export default function EtaList({
             </div>
             {stopName && onRemind && (
               <p className="text-[10px] text-stone-600 mt-2">
-                {lang === 'tc'
-                  ? '撳 🔔 設定到站前提醒（需允許通知）'
-                  : 'Tap 🔔 to set arrival reminder (needs notification permission)'}
+                {lang === 'tc' ? '🔔 = 到站前提醒' : '🔔 = reminder'}
               </p>
             )}
           </div>

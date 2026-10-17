@@ -48,8 +48,8 @@ export default function MtrPanel({ lang }: Props) {
   const currentLine = MTR_LINES.find((l) => l.code === line)
   const currentStation = stations.find((s) => s.code === station)
 
-  const load = useCallback(async () => {
-    if (!line || !station) return
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!line || !station) return false
     setLoading(true)
     setError(null)
     try {
@@ -61,19 +61,43 @@ export default function MtrPanel({ lang }: Props) {
       setUpdatedAt(
         `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
       )
+      setLoading(false)
+      // 有資料或明確無班次都算成功
+      return true
     } catch (e: any) {
       setError(e.message || 'Failed to load')
-      setUp([])
-      setDown([])
-    } finally {
       setLoading(false)
+      return false
     }
   }, [line, station, lang])
 
   useEffect(() => {
-    load()
-    const t = setInterval(load, 20000)
-    return () => clearInterval(t)
+    let cancelled = false
+    let retryTimer: number | undefined
+    let intervalTimer: number | undefined
+
+    const run = async () => {
+      let ok = await load()
+      // 失敗自動重試最多 4 次，唔使用家撳
+      for (let i = 0; !ok && !cancelled && i < 4; i++) {
+        await new Promise<void>((resolve) => {
+          retryTimer = window.setTimeout(resolve, 1200 * (i + 1))
+        })
+        if (cancelled) return
+        ok = await load()
+      }
+      if (!cancelled) {
+        intervalTimer = window.setInterval(() => {
+          load()
+        }, 20000)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+      if (retryTimer) window.clearTimeout(retryTimer)
+      if (intervalTimer) window.clearInterval(intervalTimer)
+    }
   }, [load])
 
   useEffect(() => {
