@@ -290,6 +290,72 @@ export async function searchRouteVariants(routeNo: string): Promise<RouteVariant
 }
 
 /** Load ordered stops for a route variant, with names & coords */
+
+/** 同一方向嘅九巴/城巴聯營（唔使用戶再揀營辦商） */
+export interface DirectionGroup {
+  key: string
+  route: string
+  dest_tc: string
+  dest_en: string
+  orig_tc: string
+  orig_en: string
+  label_tc: string
+  label_en: string
+  /** 主用（優先九巴，有完整站序） */
+  primary: RouteVariant
+  partners: RouteVariant[]
+  isJoint: boolean
+}
+
+function normDest(s: string): string {
+  return (s || '')
+    .replace(/\s+/g, '')
+    .replace(/[()（）]/g, '')
+    .toLowerCase()
+}
+
+/** 將 search 結果合併成「方向」列表；聯營線唔分開九巴/城巴 */
+export function groupVariantsByDirection(list: RouteVariant[]): DirectionGroup[] {
+  const map = new Map<string, RouteVariant[]>()
+  for (const v of list) {
+    // 以路線 + 終點分組（忽略營辦商）
+    const key = `${v.route.toUpperCase()}|${normDest(v.dest_tc) || normDest(v.dest_en)}`
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(v)
+  }
+  const groups: DirectionGroup[] = []
+  for (const [, arr] of map) {
+    // 同一方向可能有多個 service_type，保留全部 partners，primary 優先 KMB + service_type 1
+    const sorted = [...arr].sort((a, b) => {
+      if (a.operator !== b.operator) return a.operator === 'KMB' ? -1 : 1
+      return String(a.service_type).localeCompare(String(b.service_type))
+    })
+    const primary = sorted[0]
+    const operators = new Set(sorted.map((x) => x.operator))
+    const isJoint = operators.has('KMB') && operators.has('CTB')
+    const coLabel = isJoint
+      ? '九巴·城巴'
+      : primary.operator === 'KMB'
+      ? '九巴'
+      : '城巴'
+    groups.push({
+      key: `${primary.route}|${normDest(primary.dest_tc)}|${sorted.map((x) => x.operator).join(',')}`,
+      route: primary.route,
+      dest_tc: primary.dest_tc,
+      dest_en: primary.dest_en,
+      orig_tc: primary.orig_tc,
+      orig_en: primary.orig_en,
+      label_tc: `${coLabel} ${primary.route} → ${primary.dest_tc}`,
+      label_en: `${isJoint ? 'KMB·CTB' : primary.operator} ${primary.route} → ${primary.dest_en}`,
+      primary,
+      partners: sorted,
+      isJoint,
+    })
+  }
+  // stable: outbound-ish first by label
+  return groups
+}
+
 export async function loadRouteStops(
   variant: RouteVariant,
   kmbStopMap?: Map<string, BusStop>
@@ -406,13 +472,24 @@ export function formatEta(eta: string | null, lang: 'tc' | 'en'): string {
   const d = new Date(eta)
   if (isNaN(d.getTime())) return eta
   const now = Date.now()
-  if (d.getTime() - now <= 0) {
+  // 已到或 1 分鐘內 → 即將到
+  if (d.getTime() - now <= 60_000) {
     return lang === 'tc' ? '即將到' : 'Due'
   }
-  // Asia/Hong_Kong style 24h clock
   const hh = String(d.getHours()).padStart(2, '0')
   const mm = String(d.getMinutes()).padStart(2, '0')
   return `${hh}:${mm}`
+}
+
+/** 按實際到站時間由近到遠排序 */
+export function sortEtasByTime<T extends { eta: string | null }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const ta = a.eta ? new Date(a.eta).getTime() : Number.POSITIVE_INFINITY
+    const tb = b.eta ? new Date(b.eta).getTime() : Number.POSITIVE_INFINITY
+    const sa = isNaN(ta) ? Number.POSITIVE_INFINITY : ta
+    const sb = isNaN(tb) ? Number.POSITIVE_INFINITY : tb
+    return sa - sb
+  })
 }
 
 export function haversine(

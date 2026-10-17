@@ -1,5 +1,5 @@
 import type { EtaItem, Lang } from '../types'
-import { formatEta } from '../lib/api'
+import { formatEta, sortEtasByTime } from '../lib/api'
 
 interface Props {
   etas: EtaItem[]
@@ -50,7 +50,7 @@ export default function EtaList({
     <div className="space-y-2 p-2">
       {Object.entries(grouped).map(([key, items]) => {
         const first = items[0]
-        const sorted = [...items].sort((a, b) => a.eta_seq - b.eta_seq).slice(0, 3)
+        const sorted = sortEtasByTime(items).slice(0, 3)
         return (
           <div
             key={key}

@@ -11,13 +11,16 @@ import {
   getCtbEta,
   getKmbRouteEta,
   searchRouteVariants,
+  groupVariantsByDirection,
   loadRouteStops,
   formatEta,
+  sortEtasByTime,
   haversine,
   getFullFare,
   formatFare,
   getSectionFares,
   type RouteVariant,
+  type DirectionGroup,
   type RouteStopItem,
 } from './lib/api'
 import type { BusStop, EtaItem, Lang, NearbyStop } from './types'
@@ -56,6 +59,8 @@ export default function App() {
   // Route search
   const [routeQuery, setRouteQuery] = useState('')
   const [variants, setVariants] = useState<RouteVariant[]>([])
+  const [directionGroups, setDirectionGroups] = useState<DirectionGroup[]>([])
+  const [activePartners, setActivePartners] = useState<RouteVariant[]>([])
   const [selectedVariant, setSelectedVariant] = useState<RouteVariant | null>(null)
   const [routeStops, setRouteStops] = useState<RouteStopItem[]>([])
   const [routeLoading, setRouteLoading] = useState(false)
@@ -63,7 +68,7 @@ export default function App() {
   const [routeError, setRouteError] = useState<string | null>(null)
   /** seq -> next few clock ETAs for current route variant */
   const [routeEtaBySeq, setRouteEtaBySeq] = useState<
-    Record<number, { eta: string | null; eta_seq: number }[]>
+    Record<number, { eta: string | null; eta_seq: number; operator: 'KMB' | 'CTB' }[]>
   >({})
 
   // CTB: when showing stop ETA we only get KMB from stop-eta; for CTB we also fetch route-specific if needed
@@ -168,19 +173,21 @@ export default function App() {
         if (v.operator === 'KMB') {
           const all = await getKmbRouteEta(v.route, v.service_type)
           const wantDir = v.bound === 'I' ? 'I' : 'O'
-          const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
+          const map: Record<number, { eta: string | null; eta_seq: number; operator: 'KMB' | 'CTB' }[]> = {}
           for (const g of all) {
             if (g.dir && g.dir !== wantDir) continue
-            map[g.seq] = g.etas.slice(0, 3).map((e) => ({
+            map[g.seq] = sortEtasByTime(g.etas).slice(0, 3).map((e) => ({
               eta: e.eta,
               eta_seq: e.eta_seq,
+              operator: 'KMB' as const,
             }))
           }
           if (!Object.keys(map).length) {
             for (const g of all) {
-              map[g.seq] = g.etas.slice(0, 3).map((e) => ({
+              map[g.seq] = sortEtasByTime(g.etas).slice(0, 3).map((e) => ({
                 eta: e.eta,
                 eta_seq: e.eta_seq,
+                operator: 'KMB' as const,
               }))
             }
           }
@@ -319,6 +326,8 @@ export default function App() {
     setRouteLoading(true)
     setRouteError(null)
     setVariants([])
+    setDirectionGroups([])
+    setActivePartners([])
     setSelectedVariant(null)
     setRouteStops([])
     setRouteEtaBySeq({})
@@ -340,11 +349,14 @@ export default function App() {
             ? `找不到路線 ${q.toUpperCase()}（九巴 / 城巴）`
             : `Route ${q.toUpperCase()} not found (KMB / CTB)`
         )
+        setDirectionGroups([])
       } else {
         setVariants(list)
-        // Auto-pick first if only one KMB outbound-like
-        if (list.length === 1) {
-          await pickVariant(list[0])
+        const groups = groupVariantsByDirection(list)
+        setDirectionGroups(groups)
+        // 只有一個方向 → 自動揀；聯營唔使再揀九巴/城巴
+        if (groups.length === 1) {
+          await pickDirection(groups[0])
         }
       }
     } catch (e: any) {
@@ -354,7 +366,19 @@ export default function App() {
     }
   }
 
-  const pickVariant = async (v: RouteVariant) => {
+  const pickDirection = async (g: DirectionGroup) => {
+    setActivePartners(g.partners)
+    await pickVariant(g.primary, g.partners)
+  }
+
+  const pickVariant = async (v: RouteVariant, partners?: RouteVariant[]) => {
+    const allPartners =
+      partners && partners.length
+        ? partners
+        : activePartners.length
+        ? activePartners
+        : [v]
+    setActivePartners(allPartners)
     setSelectedVariant(v)
     setStopsLoadingRoute(true)
     setRouteStops([])
@@ -426,45 +450,107 @@ export default function App() {
       // 自動載入各站到站時間，失敗會自動重試
       const loadRouteEtas = async (): Promise<boolean> => {
         try {
-          if (v.operator === 'KMB') {
-            const all = await getKmbRouteEta(v.route, v.service_type)
-            const wantDir = v.bound === 'I' ? 'I' : 'O'
-            const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
-            for (const g of all) {
-              if (g.dir && g.dir !== wantDir) continue
-              map[g.seq] = g.etas.slice(0, 3).map((e) => ({
-                eta: e.eta,
-                eta_seq: e.eta_seq,
-              }))
-            }
-            if (!Object.keys(map).length) {
+          const map: Record<number, { eta: string | null; eta_seq: number; operator: 'KMB' | 'CTB' }[]> = {}
+          const partners =
+            allPartners && allPartners.length ? allPartners : [v]
+
+          // KMB route-eta（一次攞齊各站）
+          const kmbP = partners.find((p) => p.operator === 'KMB')
+          if (kmbP) {
+            try {
+              const all = await getKmbRouteEta(kmbP.route, kmbP.service_type)
+              const wantDir = kmbP.bound === 'I' ? 'I' : 'O'
               for (const g of all) {
-                map[g.seq] = g.etas.slice(0, 3).map((e) => ({
-                  eta: e.eta,
-                  eta_seq: e.eta_seq,
-                }))
-              }
-            }
-            setRouteEtaBySeq(map)
-            return Object.keys(map).length > 0
-          }
-          const map: Record<number, { eta: string | null; eta_seq: number }[]> = {}
-          const batch = stops.slice(0, 30)
-          await Promise.all(
-            batch.map(async (s) => {
-              try {
-                const etas = await getCtbEta(s.stopId, v.route)
-                if (etas.length) {
-                  map[s.seq] = etas.slice(0, 3).map((e) => ({
+                if (g.dir && g.dir !== wantDir) continue
+                const sorted = sortEtasByTime(g.etas).slice(0, 4)
+                if (!map[g.seq]) map[g.seq] = []
+                map[g.seq].push(
+                  ...sorted.map((e) => ({
                     eta: e.eta,
                     eta_seq: e.eta_seq,
+                    operator: 'KMB' as const,
                   }))
-                }
-              } catch {
-                /* ignore */
+                )
               }
-            })
-          )
+              if (!Object.keys(map).length) {
+                for (const g of all) {
+                  const sorted = sortEtasByTime(g.etas).slice(0, 4)
+                  if (!map[g.seq]) map[g.seq] = []
+                  map[g.seq].push(
+                    ...sorted.map((e) => ({
+                      eta: e.eta,
+                      eta_seq: e.eta_seq,
+                      operator: 'KMB' as const,
+                    }))
+                  )
+                }
+              }
+            } catch (e) {
+              console.error('KMB route-eta', e)
+            }
+          }
+
+          // 城巴：用站點座標配對後合併時間
+          const ctbP = partners.find((p) => p.operator === 'CTB')
+          if (ctbP) {
+            try {
+              let ctbStops = await loadRouteStops(ctbP, kmbStopMap)
+              if (!ctbStops.length) {
+                // 試另一方向
+                const altBound =
+                  ctbP.bound === 'outbound' || ctbP.bound === 'O'
+                    ? 'inbound'
+                    : 'outbound'
+                ctbStops = await loadRouteStops(
+                  { ...ctbP, bound: altBound },
+                  kmbStopMap
+                )
+              }
+              // 每個主線站搵最近城巴站（80m 內）
+              const matches: { seq: number; ctbStopId: string }[] = []
+              for (const s of stops) {
+                if (!s.lat || !s.lng) continue
+                let best: { id: string; d: number } | null = null
+                for (const cs of ctbStops) {
+                  if (!cs.lat || !cs.lng) continue
+                  const d = haversine(s.lat, s.lng, cs.lat, cs.lng)
+                  if (d < 80 && (!best || d < best.d)) {
+                    best = { id: cs.stopId, d }
+                  }
+                }
+                if (best) matches.push({ seq: s.seq, ctbStopId: best.id })
+              }
+              // 最多 20 個站並行攞城巴 ETA
+              await Promise.all(
+                matches.slice(0, 20).map(async (m) => {
+                  try {
+                    const etas = await getCtbEta(m.ctbStopId, ctbP.route)
+                    if (!etas.length) return
+                    if (!map[m.seq]) map[m.seq] = []
+                    map[m.seq].push(
+                      ...sortEtasByTime(etas)
+                        .slice(0, 3)
+                        .map((e) => ({
+                          eta: e.eta,
+                          eta_seq: e.eta_seq,
+                          operator: 'CTB' as const,
+                        }))
+                    )
+                  } catch {
+                    /* ignore */
+                  }
+                })
+              )
+            } catch (e) {
+              console.error('CTB merge eta', e)
+            }
+          }
+
+          // 各站時間合併後再排序截取
+          for (const seq of Object.keys(map)) {
+            const n = Number(seq)
+            map[n] = sortEtasByTime(map[n]).slice(0, 4)
+          }
           setRouteEtaBySeq(map)
           return Object.keys(map).length > 0
         } catch (e) {
@@ -708,55 +794,50 @@ export default function App() {
                   )}
 
                   {/* Direction / variant chips */}
-                  {variants.length > 0 && (
-                    <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto">
-                      {variants.map((v, i) => {
-                        const key = `${v.operator}-${v.route}-${v.bound}-${v.service_type}-${i}`
+                  {directionGroups.length > 0 && (
+                    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                      {directionGroups.map((g) => {
                         const active =
-                          selectedVariant?.operator === v.operator &&
-                          selectedVariant?.route === v.route &&
-                          selectedVariant?.bound === v.bound &&
-                          selectedVariant?.service_type === v.service_type
+                          !!selectedVariant &&
+                          selectedVariant.route === g.route &&
+                          (selectedVariant.dest_tc === g.dest_tc ||
+                            selectedVariant.dest_en === g.dest_en)
                         return (
-                          <div key={key} className="flex gap-1 items-stretch">
-                            <button
-                              onClick={() => pickVariant(v)}
-                              className={`flex-1 text-left px-3 py-2 rounded-xl text-xs border transition ${
-                                active
-                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-                                  : 'bg-stone-100 border-stone-200 text-stone-700 hover:border-stone-400'
+                          <button
+                            key={g.key}
+                            type="button"
+                            onClick={() => pickDirection(g)}
+                            className={`w-full text-left px-3 py-2.5 rounded-xl text-sm border transition ${
+                              active
+                                ? 'bg-stone-800 text-white border-stone-800'
+                                : 'bg-white text-stone-800 border-stone-200 hover:border-stone-400'
+                            }`}
+                          >
+                            <div className="font-semibold">
+                              {lang === 'tc' ? g.label_tc : g.label_en}
+                            </div>
+                            <div
+                              className={`text-[11px] mt-0.5 ${
+                                active ? 'text-stone-300' : 'text-stone-500'
                               }`}
                             >
-                              <span
-                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold mr-2 ${
-                                  v.operator === 'KMB'
-                                    ? 'bg-kmb text-white'
-                                    : 'bg-ctb text-white'
-                                }`}
-                              >
-                                {v.operator}
-                              </span>
-                              {lang === 'tc' ? v.label_tc : v.label_en}
-                            </button>
-                            <button
-                              type="button"
-                              className="px-2 rounded-xl border border-stone-200 text-amber-400 text-sm"
-                              onClick={() => {
-                                toggleRoute(v)
-                                showToast(
-                                  isRouteFav(v)
-                                    ? lang === 'tc'
-                                      ? '已取消收藏路線'
-                                      : 'Route unfavourited'
-                                    : lang === 'tc'
-                                    ? '已收藏路線'
-                                    : 'Route saved'
-                                )
-                              }}
-                            >
-                              {isRouteFav(v) ? '★' : '☆'}
-                            </button>
-                          </div>
+                              {g.isJoint
+                                ? lang === 'tc'
+                                  ? '聯營 · 到站時間合併九巴+城巴'
+                                  : 'Joint · KMB+CTB times merged'
+                                : g.primary.operator === 'KMB'
+                                ? lang === 'tc'
+                                  ? '九巴'
+                                  : 'KMB'
+                                : lang === 'tc'
+                                ? '城巴'
+                                : 'Citybus'}
+                              {' · '}
+                              {lang === 'tc' ? g.orig_tc : g.orig_en}
+                              {' → '}
+                              {lang === 'tc' ? g.dest_tc : g.dest_en}
+                            </div>
+                          </button>
                         )
                       })}
                     </div>
@@ -1111,7 +1192,7 @@ export default function App() {
                         </p>
                       )}
                       {routeStops.map((s, idx) => {
-                        const times = routeEtaBySeq[s.seq] || []
+                        const times = sortEtasByTime(routeEtaBySeq[s.seq] || [])
                         const isNearest = nearestStopId === s.stopId
                         const boardFare =
                           sectionFares && sectionFares[idx] != null
@@ -1174,13 +1255,36 @@ export default function App() {
                                 times.map((tm, i) => (
                                   <span
                                     key={i}
-                                    className={`tabular-nums text-sm font-bold px-2 py-0.5 rounded-md ${
+                                    className={`inline-flex flex-col items-center leading-tight px-2 py-1 rounded-md ${
                                       i === 0
-                                        ? 'bg-emerald-100 text-emerald-900'
-                                        : 'bg-stone-100 text-stone-800'
+                                        ? 'bg-emerald-100'
+                                        : 'bg-stone-100'
                                     }`}
                                   >
-                                    {formatEta(tm.eta, lang)}
+                                    <span
+                                      className={`tabular-nums text-sm font-bold ${
+                                        i === 0
+                                          ? 'text-emerald-900'
+                                          : 'text-stone-800'
+                                      }`}
+                                    >
+                                      {formatEta(tm.eta, lang)}
+                                    </span>
+                                    <span
+                                      className={`text-[9px] font-semibold mt-0.5 ${
+                                        tm.operator === 'CTB'
+                                          ? 'text-orange-600'
+                                          : 'text-red-700'
+                                      }`}
+                                    >
+                                      {tm.operator === 'CTB'
+                                        ? lang === 'tc'
+                                          ? '城巴'
+                                          : 'CTB'
+                                        : lang === 'tc'
+                                        ? '九巴'
+                                        : 'KMB'}
+                                    </span>
                                   </span>
                                 ))
                               )}
