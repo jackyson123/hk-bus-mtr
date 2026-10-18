@@ -221,7 +221,7 @@ export default function MtrPanel({ lang }: Props) {
   return (
     <div className="pb-8">
       {/* Sticky compact header */}
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-stone-200 px-3 pt-3 pb-2 space-y-2">
+      <div className="sticky top-0 z-30 bg-white border-b border-stone-200 px-3 pt-3 pb-2 space-y-2 shadow-sm">
         <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
           {MTR_LINES.map((l) => {
             const active = line === l.code
@@ -293,7 +293,7 @@ export default function MtrPanel({ lang }: Props) {
 
       {/* MAP optional — after controls, before trains, only if open */}
       {mapOpen && lineStops.length > 0 && (
-        <div className="mx-3 mt-3 h-36 rounded-xl overflow-hidden border border-stone-200 relative">
+        <div className="mx-3 mt-3 h-36 rounded-xl overflow-hidden border border-stone-200 relative z-0 isolate [&>div]:!z-0 [&_.leaflet-container]:!z-0 [&_.leaflet-pane]:!z-0 [&_.leaflet-top]:!z-10 [&_.leaflet-bottom]:!z-10">
           <MapView
             userLat={null}
             userLng={null}
@@ -310,7 +310,7 @@ export default function MtrPanel({ lang }: Props) {
       )}
 
       {/* TRAINS — full natural height, page scrolls */}
-      <div className="px-3 pt-4 space-y-8">
+      <div className="px-3 pt-4 space-y-8 relative z-10 bg-stone-50">
         {loading && !up.length && !down.length ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (

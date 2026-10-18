@@ -13,7 +13,25 @@ html, body, #root {
 .leaflet-container {
   background: #e7e5e4;
   font-family: inherit;
+  z-index: 0 !important;
 }
+
+/* 避免 Leaflet pane 蓋住頁面 sticky 控制列 / 班次列表 */
+.leaflet-pane,
+.leaflet-map-pane,
+.leaflet-tile-pane,
+.leaflet-overlay-pane,
+.leaflet-shadow-pane,
+.leaflet-marker-pane,
+.leaflet-tooltip-pane,
+.leaflet-popup-pane {
+  z-index: auto !important;
+}
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 5 !important;
+}
+
 
 .leaflet-popup-content-wrapper {
   background: #ffffff;

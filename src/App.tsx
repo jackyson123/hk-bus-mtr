@@ -1248,11 +1248,14 @@ export default function App() {
                               )
                             }
                             return (
-                              <div className="space-y-2.5">
+                              <div className="space-y-2">
                                 {groups.slice(0, 8).map((g) => (
-                                  <div key={g.key} className="flex items-start gap-2">
+                                  <div
+                                    key={g.key}
+                                    className="grid grid-cols-[3.25rem_1fr] gap-x-2 gap-y-1 items-center"
+                                  >
                                     <span
-                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white flex-shrink-0 mt-1 ${
+                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white text-center justify-self-start ${
                                         g.operator === 'KMB'
                                           ? 'bg-red-600'
                                           : 'bg-orange-500'
@@ -1260,22 +1263,34 @@ export default function App() {
                                     >
                                       {g.route}
                                     </span>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="text-stone-700 text-xs truncate mb-1">
-                                        → {lang === 'tc' ? g.dest_tc : g.dest_en}
-                                      </div>
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {g.times.map((e, i) => (
+                                    <div className="text-stone-700 text-xs truncate min-w-0">
+                                      → {lang === 'tc' ? g.dest_tc : g.dest_en}
+                                    </div>
+                                    <div />
+                                    <div className="grid grid-cols-3 gap-1.5 w-full max-w-[16rem]">
+                                      {[0, 1, 2].map((i) => {
+                                        const e = g.times[i]
+                                        if (!e) {
+                                          return (
+                                            <span
+                                              key={i}
+                                              className="invisible px-1 py-1 text-sm"
+                                            >
+                                              —
+                                            </span>
+                                          )
+                                        }
+                                        return (
                                           <span
                                             key={i}
-                                            className={`inline-flex flex-col items-center leading-tight px-2 py-1 rounded-md ${
+                                            className={`inline-flex flex-col items-center justify-center leading-tight px-1 py-1 rounded-md min-w-0 ${
                                               i === 0
                                                 ? 'bg-emerald-100'
                                                 : 'bg-stone-100'
                                             }`}
                                           >
                                             <span
-                                              className={`tabular-nums text-sm font-bold ${
+                                              className={`tabular-nums text-sm font-bold whitespace-nowrap ${
                                                 i === 0
                                                   ? 'text-emerald-900'
                                                   : 'text-stone-800'
@@ -1299,8 +1314,8 @@ export default function App() {
                                                 : 'KMB'}
                                             </span>
                                           </span>
-                                        ))}
-                                      </div>
+                                        )
+                                      })}
                                     </div>
                                   </div>
                                 ))}
