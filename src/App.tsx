@@ -80,12 +80,16 @@ export default function App() {
   const {
     favStops,
     favRoutes,
+    favRouteStops,
     isStopFav,
     isRouteFav,
+    isRouteStopFav,
     toggleStop,
     toggleRoute,
+    toggleRouteStop,
     removeStop,
     removeRoute,
+    removeRouteStop,
   } = useFavorites()
 
   const { reminders, addReminder, cancelReminder } = useReminders(lang)
