@@ -145,13 +145,14 @@ export default function App() {
     let cancelled = false
     ;(async () => {
       setNearbyEtaLoading(true)
-      const top = nearby.slice(0, 8)
+      const top = nearby.slice(0, 12)
       const map: Record<string, EtaItem[]> = {}
       await Promise.all(
         top.map(async (s) => {
           try {
             const etas = await getKmbStopEta(s.id)
-            if (!cancelled) map[s.id] = etas.slice(0, 8)
+            // 保留多班（每線通常 2–3 班）
+            if (!cancelled) map[s.id] = etas.slice(0, 24)
           } catch {
             if (!cancelled) map[s.id] = []
           }
@@ -1175,9 +1176,9 @@ export default function App() {
                     </p>
                   )}
                   <div className="space-y-3 max-h-[50vh] overflow-y-auto">
-                    {filteredNearby.slice(0, 8).map((s) => {
+                    {filteredNearby.slice(0, 12).map((s) => {
                       const etas = nearbyEtas[s.id] || []
-                      const sorted = sortEtasByTime(etas).slice(0, 6)
+                      // 按路線分組，每線顯示最多 3 班
                       return (
                         <button
                           key={s.id}
@@ -1197,67 +1198,115 @@ export default function App() {
                               {Math.round(s.distance)}m
                             </span>
                           </div>
-                          {sorted.length === 0 ? (
-                            <p className="text-sm text-stone-600">
-                              {nearbyEtaLoading
-                                ? '…'
-                                : lang === 'tc'
-                                ? '暫無到站'
-                                : 'No ETA'}
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {sorted.map((e, i) => (
-                                <div
-                                  key={`${e.operator}-${e.route}-${e.eta_seq}-${i}`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <span
-                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white flex-shrink-0 ${
-                                      e.operator === 'KMB' ? 'bg-red-600' : 'bg-orange-500'
-                                    }`}
-                                  >
-                                    {e.route}
-                                  </span>
-                                  <span className="text-stone-700 truncate flex-1 text-xs min-w-0">
-                                    → {lang === 'tc' ? e.dest_tc : e.dest_en}
-                                  </span>
-                                  <span
-                                    className={`inline-flex flex-col items-center leading-tight px-2 py-1 rounded-md flex-shrink-0 ${
-                                      i === 0
-                                        ? 'bg-emerald-100'
-                                        : 'bg-stone-100'
-                                    }`}
-                                  >
+                          {(() => {
+                            // 按 營辦商+路線 分組，每組最多 3 班時間
+                            const groups: {
+                              key: string
+                              operator: string
+                              route: string
+                              dest_tc: string
+                              dest_en: string
+                              times: typeof etas
+                            }[] = []
+                            const seen = new Map<string, number>()
+                            for (const e of sortEtasByTime(etas)) {
+                              const key = `${e.operator}-${e.route}`
+                              if (!seen.has(key)) {
+                                seen.set(key, groups.length)
+                                groups.push({
+                                  key,
+                                  operator: e.operator,
+                                  route: e.route,
+                                  dest_tc: e.dest_tc,
+                                  dest_en: e.dest_en,
+                                  times: [e],
+                                })
+                              } else {
+                                const g = groups[seen.get(key)!]
+                                if (g.times.length < 3) g.times.push(e)
+                              }
+                            }
+                            // 用每線第一班時間再排序各線
+                            groups.sort((a, b) => {
+                              const ta = a.times[0]?.eta
+                                ? new Date(a.times[0].eta!).getTime()
+                                : Infinity
+                              const tb = b.times[0]?.eta
+                                ? new Date(b.times[0].eta!).getTime()
+                                : Infinity
+                              return ta - tb
+                            })
+                            if (!groups.length) {
+                              return (
+                                <p className="text-sm text-stone-600">
+                                  {nearbyEtaLoading
+                                    ? '…'
+                                    : lang === 'tc'
+                                    ? '暫無到站'
+                                    : 'No ETA'}
+                                </p>
+                              )
+                            }
+                            return (
+                              <div className="space-y-2.5">
+                                {groups.slice(0, 8).map((g) => (
+                                  <div key={g.key} className="flex items-start gap-2">
                                     <span
-                                      className={`tabular-nums text-sm font-bold ${
-                                        i === 0
-                                          ? 'text-emerald-900'
-                                          : 'text-stone-800'
+                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white flex-shrink-0 mt-1 ${
+                                        g.operator === 'KMB'
+                                          ? 'bg-red-600'
+                                          : 'bg-orange-500'
                                       }`}
                                     >
-                                      {formatEta(e.eta, lang)}
+                                      {g.route}
                                     </span>
-                                    <span
-                                      className={`text-[9px] font-semibold mt-0.5 ${
-                                        e.operator === 'CTB'
-                                          ? 'text-orange-600'
-                                          : 'text-red-700'
-                                      }`}
-                                    >
-                                      {e.operator === 'CTB'
-                                        ? lang === 'tc'
-                                          ? '城巴'
-                                          : 'CTB'
-                                        : lang === 'tc'
-                                        ? '九巴'
-                                        : 'KMB'}
-                                    </span>
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-stone-700 text-xs truncate mb-1">
+                                        → {lang === 'tc' ? g.dest_tc : g.dest_en}
+                                      </div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {g.times.map((e, i) => (
+                                          <span
+                                            key={i}
+                                            className={`inline-flex flex-col items-center leading-tight px-2 py-1 rounded-md ${
+                                              i === 0
+                                                ? 'bg-emerald-100'
+                                                : 'bg-stone-100'
+                                            }`}
+                                          >
+                                            <span
+                                              className={`tabular-nums text-sm font-bold ${
+                                                i === 0
+                                                  ? 'text-emerald-900'
+                                                  : 'text-stone-800'
+                                              }`}
+                                            >
+                                              {formatEta(e.eta, lang)}
+                                            </span>
+                                            <span
+                                              className={`text-[9px] font-semibold mt-0.5 ${
+                                                g.operator === 'CTB'
+                                                  ? 'text-orange-600'
+                                                  : 'text-red-700'
+                                              }`}
+                                            >
+                                              {g.operator === 'CTB'
+                                                ? lang === 'tc'
+                                                  ? '城巴'
+                                                  : 'CTB'
+                                                : lang === 'tc'
+                                                ? '九巴'
+                                                : 'KMB'}
+                                            </span>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          })()}
                         </button>
                       )
                     })}
