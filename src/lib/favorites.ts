@@ -3,6 +3,7 @@ import type { RouteVariant } from './api'
 
 const STOPS_KEY = 'hk-bus-mtr-fav-stops'
 const ROUTES_KEY = 'hk-bus-mtr-fav-routes'
+const ROUTE_STOPS_KEY = 'hk-bus-mtr-fav-route-stops'
 
 export interface FavStop {
   id: string
@@ -101,4 +102,42 @@ export function favKeyRoute(v: {
   service_type: string
 }) {
   return `${v.operator}:${v.route}:${v.bound}:${v.service_type}`
+}
+
+export interface FavRouteStop {
+  operator: string
+  route: string
+  bound: string
+  service_type: string
+  dest_tc: string
+  dest_en: string
+  orig_tc: string
+  orig_en: string
+  stopId: string
+  stopName_tc: string
+  stopName_en: string
+  stopLat: number
+  stopLng: number
+  seq: number
+  /** 聯營 partners 序列化 */
+  partnersJson?: string
+  savedAt: number
+}
+
+export function loadFavRouteStops(): FavRouteStop[] {
+  return readJson<FavRouteStop[]>(ROUTE_STOPS_KEY, [])
+}
+
+export function saveFavRouteStops(list: FavRouteStop[]) {
+  writeJson(ROUTE_STOPS_KEY, list)
+}
+
+export function favKeyRouteStop(v: {
+  operator: string
+  route: string
+  bound: string
+  service_type: string
+  stopId: string
+}) {
+  return `${v.operator}:${v.route}:${v.bound}:${v.service_type}:${v.stopId}`
 }

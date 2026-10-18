@@ -912,6 +912,99 @@ export default function App() {
                 <div className="flex-shrink-0 p-3 space-y-3 border-b border-stone-200">
                   <div>
                     <p className="text-[10px] text-stone-600 uppercase tracking-wider mb-1">
+                      {lang === 'tc' ? '收藏路線站' : 'Favourite route stops'}
+                    </p>
+                    {favRouteStops.length === 0 ? (
+                      <p className="text-xs text-stone-600 mb-2">
+                        {lang === 'tc'
+                          ? '喺路線站旁撳 ☆ 可收藏「路線+方向+站」'
+                          : 'Tap ☆ on a route stop to save route+direction+stop'}
+                      </p>
+                    ) : (
+                      <div className="space-y-1 mb-3">
+                        {favRouteStops.map((rs) => (
+                          <div
+                            key={`${rs.operator}-${rs.route}-${rs.bound}-${rs.stopId}`}
+                            className="flex items-center gap-2"
+                          >
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const v: RouteVariant = {
+                                  operator: rs.operator as 'KMB' | 'CTB',
+                                  route: rs.route,
+                                  bound: rs.bound,
+                                  service_type: rs.service_type,
+                                  dest_tc: rs.dest_tc,
+                                  dest_en: rs.dest_en,
+                                  orig_tc: rs.orig_tc,
+                                  orig_en: rs.orig_en,
+                                  label_tc: `${rs.route} → ${rs.dest_tc}`,
+                                  label_en: `${rs.route} → ${rs.dest_en}`,
+                                }
+                                let partners: RouteVariant[] = [v]
+                                try {
+                                  if (rs.partnersJson) {
+                                    partners = JSON.parse(rs.partnersJson)
+                                  }
+                                } catch {
+                                  /* ignore */
+                                }
+                                setBusMode('route')
+                                setRouteQuery(rs.route)
+                                await pickVariant(v, partners)
+                                // 選中收藏站並開同站其他車可選
+                                handleSelectRouteStop({
+                                  seq: rs.seq,
+                                  stopId: rs.stopId,
+                                  name_tc: rs.stopName_tc,
+                                  name_en: rs.stopName_en,
+                                  lat: rs.stopLat,
+                                  lng: rs.stopLng,
+                                  operator: rs.operator as 'KMB' | 'CTB',
+                                })
+                                setNearestStopId(rs.stopId)
+                                window.setTimeout(() => {
+                                  nearestStopRef.current?.scrollIntoView({
+                                    behavior: 'smooth',
+                                    block: 'center',
+                                  })
+                                }, 400)
+                              }}
+                              className="flex-1 text-left px-3 py-2 rounded-lg text-xs bg-stone-50 hover:bg-stone-100 border border-stone-200"
+                            >
+                              <div className="font-bold text-sm">
+                                {rs.route}{' '}
+                                <span className="font-normal text-stone-600">
+                                  → {lang === 'tc' ? rs.dest_tc : rs.dest_en}
+                                </span>
+                              </div>
+                              <div className="text-stone-700 mt-0.5">
+                                {lang === 'tc' ? rs.stopName_tc : rs.stopName_en}
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              className="text-amber-500 px-2"
+                              onClick={() =>
+                                removeRouteStop({
+                                  operator: rs.operator,
+                                  route: rs.route,
+                                  bound: rs.bound,
+                                  service_type: rs.service_type,
+                                  stopId: rs.stopId,
+                                })
+                              }
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-stone-600 uppercase tracking-wider mb-1">
                       {lang === 'tc' ? '收藏車站' : 'Favourite stops'}
                     </p>
                     {favStops.length === 0 ? (
@@ -1080,13 +1173,7 @@ export default function App() {
                   <div className="space-y-3 max-h-[50vh] overflow-y-auto">
                     {filteredNearby.slice(0, 8).map((s) => {
                       const etas = nearbyEtas[s.id] || []
-                      // group by route
-                      const byRoute: Record<string, typeof etas> = {}
-                      for (const e of etas) {
-                        const k = `${e.operator}-${e.route}`
-                        if (!byRoute[k]) byRoute[k] = []
-                        byRoute[k].push(e)
-                      }
+                      const sorted = sortEtasByTime(etas).slice(0, 6)
                       return (
                         <button
                           key={s.id}
@@ -1106,7 +1193,7 @@ export default function App() {
                               {Math.round(s.distance)}m
                             </span>
                           </div>
-                          {etas.length === 0 ? (
+                          {sorted.length === 0 ? (
                             <p className="text-sm text-stone-600">
                               {nearbyEtaLoading
                                 ? '…'
@@ -1115,36 +1202,56 @@ export default function App() {
                                 : 'No ETA'}
                             </p>
                           ) : (
-                            <div className="space-y-1.5">
-                              {Object.values(byRoute)
-                                .slice(0, 5)
-                                .map((items) => {
-                                  const first = items[0]
-                                  const times = items
-                                    .slice(0, 2)
-                                    .map((e) => formatEta(e.eta, lang))
-                                    .join(' · ')
-                                  return (
-                                    <div
-                                      key={`${first.operator}-${first.route}`}
-                                      className="flex items-center gap-2 text-sm"
+                            <div className="space-y-2">
+                              {sorted.map((e, i) => (
+                                <div
+                                  key={`${e.operator}-${e.route}-${e.eta_seq}-${i}`}
+                                  className="flex items-center gap-2"
+                                >
+                                  <span
+                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white flex-shrink-0 ${
+                                      e.operator === 'KMB' ? 'bg-red-600' : 'bg-orange-500'
+                                    }`}
+                                  >
+                                    {e.route}
+                                  </span>
+                                  <span className="text-stone-700 truncate flex-1 text-xs min-w-0">
+                                    → {lang === 'tc' ? e.dest_tc : e.dest_en}
+                                  </span>
+                                  <span
+                                    className={`inline-flex flex-col items-center leading-tight px-2 py-1 rounded-md flex-shrink-0 ${
+                                      i === 0
+                                        ? 'bg-emerald-100'
+                                        : 'bg-stone-100'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`tabular-nums text-sm font-bold ${
+                                        i === 0
+                                          ? 'text-emerald-900'
+                                          : 'text-stone-800'
+                                      }`}
                                     >
-                                      <span
-                                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white ${
-                                          first.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
-                                        }`}
-                                      >
-                                        {first.route}
-                                      </span>
-                                      <span className="text-stone-700 truncate flex-1 text-xs">
-                                        → {lang === 'tc' ? first.dest_tc : first.dest_en}
-                                      </span>
-                                      <span className="font-semibold tabular-nums text-stone-800 flex-shrink-0">
-                                        {times}
-                                      </span>
-                                    </div>
-                                  )
-                                })}
+                                      {formatEta(e.eta, lang)}
+                                    </span>
+                                    <span
+                                      className={`text-[9px] font-semibold mt-0.5 ${
+                                        e.operator === 'CTB'
+                                          ? 'text-orange-600'
+                                          : 'text-red-700'
+                                      }`}
+                                    >
+                                      {e.operator === 'CTB'
+                                        ? lang === 'tc'
+                                          ? '城巴'
+                                          : 'CTB'
+                                        : lang === 'tc'
+                                        ? '九巴'
+                                        : 'KMB'}
+                                    </span>
+                                  </span>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </button>
@@ -1245,6 +1352,64 @@ export default function App() {
                               >
                                 {lang === 'tc' ? '其他車' : 'Other'}
                               </span>
+                              {selectedVariant && (
+                                <button
+                                  type="button"
+                                  className="flex-shrink-0 text-base px-1"
+                                  title={
+                                    lang === 'tc'
+                                      ? '收藏此線此站'
+                                      : 'Favourite this route stop'
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const v = selectedVariant
+                                    toggleRouteStop({
+                                      operator: v.operator,
+                                      route: v.route,
+                                      bound: v.bound,
+                                      service_type: v.service_type,
+                                      dest_tc: v.dest_tc,
+                                      dest_en: v.dest_en,
+                                      orig_tc: v.orig_tc,
+                                      orig_en: v.orig_en,
+                                      stopId: s.stopId,
+                                      stopName_tc: s.name_tc,
+                                      stopName_en: s.name_en,
+                                      stopLat: s.lat,
+                                      stopLng: s.lng,
+                                      seq: s.seq,
+                                      partnersJson: JSON.stringify(activePartners),
+                                      savedAt: Date.now(),
+                                    })
+                                    showToast(
+                                      isRouteStopFav({
+                                        operator: v.operator,
+                                        route: v.route,
+                                        bound: v.bound,
+                                        service_type: v.service_type,
+                                        stopId: s.stopId,
+                                      })
+                                        ? lang === 'tc'
+                                          ? '已取消收藏'
+                                          : 'Removed'
+                                        : lang === 'tc'
+                                        ? '已收藏此線此站'
+                                        : 'Saved route stop'
+                                    )
+                                  }}
+                                >
+                                  {isRouteStopFav({
+                                    operator: selectedVariant.operator,
+                                    route: selectedVariant.route,
+                                    bound: selectedVariant.bound,
+                                    service_type: selectedVariant.service_type,
+                                    stopId: s.stopId,
+                                  })
+                                    ? '★'
+                                    : '☆'}
+                                </button>
+                              )}
                             </button>
                             <div className="pl-8 flex flex-wrap items-center gap-2">
                               {times.length === 0 ? (
