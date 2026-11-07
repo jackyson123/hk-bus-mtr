@@ -325,9 +325,10 @@ export default function App() {
   }
 
   // Search route number
-  const onSearchRoute = async () => {
-    const q = routeQuery.trim()
+  const onSearchRoute = async (overrideQuery?: string) => {
+    const q = (overrideQuery ?? routeQuery).trim()
     if (!q) return
+    if (overrideQuery) setRouteQuery(q.toUpperCase())
     setRouteLoading(true)
     setRouteError(null)
     setVariants([])
@@ -1254,18 +1255,40 @@ export default function App() {
                                     key={g.key}
                                     className="grid grid-cols-[3.25rem_1fr] gap-x-2 gap-y-1 items-center"
                                   >
-                                    <span
-                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white text-center justify-self-start ${
+                                    <button
+                                      type="button"
+                                      title={
+                                        lang === 'tc'
+                                          ? `查路線 ${g.route}`
+                                          : `Search route ${g.route}`
+                                      }
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        onSearchRoute(g.route)
+                                      }}
+                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white text-center justify-self-start active:scale-95 ${
                                         g.operator === 'KMB'
                                           ? 'bg-red-600'
                                           : 'bg-orange-500'
                                       }`}
                                     >
                                       {g.route}
-                                    </span>
-                                    <div className="text-stone-700 text-xs truncate min-w-0">
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title={
+                                        lang === 'tc'
+                                          ? `查路線 ${g.route}`
+                                          : `Search route ${g.route}`
+                                      }
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        onSearchRoute(g.route)
+                                      }}
+                                      className="text-stone-700 text-xs truncate min-w-0 text-left hover:text-stone-900"
+                                    >
                                       → {lang === 'tc' ? g.dest_tc : g.dest_en}
-                                    </div>
+                                    </button>
                                     <div />
                                     <div className="grid grid-cols-3 gap-1.5 w-full max-w-[16rem]">
                                       {[0, 1, 2].map((i) => {
