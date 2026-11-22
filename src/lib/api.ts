@@ -24,9 +24,13 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 // ---------- KMB ----------
+/** 路線清單（~1800 條）快取，避免每次查詢都重新下載 */
+let kmbRoutesCache: BusRoute[] | null = null
+
 export async function getKmbRoutes(): Promise<BusRoute[]> {
+  if (kmbRoutesCache) return kmbRoutesCache
   const data = await fetchJson<{ data: any[] }>(`${KMB_BASE}/route/`)
-  return (data.data || []).map((r) => ({
+  const list: BusRoute[] = (data.data || []).map((r) => ({
     route: r.route,
     dest_tc: r.dest_tc,
     dest_en: r.dest_en,
@@ -36,6 +40,8 @@ export async function getKmbRoutes(): Promise<BusRoute[]> {
     bound: r.bound, // O / I
     operator: 'KMB' as const,
   }))
+  if (list.length) kmbRoutesCache = list
+  return list
 }
 
 export async function getKmbStops(): Promise<BusStop[]> {
@@ -135,7 +141,7 @@ export async function getKmbRouteEta(
     `${KMB_BASE}/route-eta/${route}/${serviceType}`
   )
   const bySeq = new Map<
-    number,
+    string,
     {
       seq: number
       dir: string
@@ -144,10 +150,13 @@ export async function getKmbRouteEta(
   >()
   for (const row of data.data || []) {
     const seq = Number(row.seq)
-    if (!bySeq.has(seq)) {
-      bySeq.set(seq, { seq, dir: row.dir || '', etas: [] })
+    const dir = row.dir || ''
+    // 上／下行嘅 seq 會重複，所以要連方向一齊做 key，否則兩個方向嘅班次會炋埋一齊
+    const key = `${dir}|${seq}`
+    if (!bySeq.has(key)) {
+      bySeq.set(key, { seq, dir, etas: [] })
     }
-    bySeq.get(seq)!.etas.push({
+    bySeq.get(key)!.etas.push({
       eta: row.eta ?? null,
       eta_seq: row.eta_seq,
       rmk_tc: row.rmk_tc,
@@ -163,9 +172,12 @@ export async function getKmbRouteEta(
 }
 
 // ---------- Citybus ----------
+let ctbRoutesCache: BusRoute[] | null = null
+
 export async function getCtbRoutes(): Promise<BusRoute[]> {
+  if (ctbRoutesCache) return ctbRoutesCache
   const data = await fetchJson<{ data: any[] }>(`${CTB_BASE}/route/CTB`)
-  return (data.data || []).map((r) => ({
+  const list: BusRoute[] = (data.data || []).map((r) => ({
     route: r.route,
     dest_tc: r.dest_tc,
     dest_en: r.dest_en,
@@ -173,6 +185,8 @@ export async function getCtbRoutes(): Promise<BusRoute[]> {
     orig_en: r.orig_en,
     operator: 'CTB' as const,
   }))
+  if (list.length) ctbRoutesCache = list
+  return list
 }
 
 export async function getCtbStop(stopId: string): Promise<BusStop | null> {

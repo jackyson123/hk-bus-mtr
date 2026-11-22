@@ -87,6 +87,8 @@ interface Props {
   fitKey?: string
   /** Draw line connecting route stops in order */
   showRouteLine?: boolean
+  /** Optional line colour for the connecting polyline (defaults to KMB red) */
+  routeColor?: string
 }
 
 export default function MapView({
@@ -100,6 +102,7 @@ export default function MapView({
   fitToStops = false,
   fitKey = '',
   showRouteLine = false,
+  routeColor = '#e30613',
 }: Props) {
   const center = useMemo(() => {
     if (fitToStops && stops.length) {
@@ -174,7 +177,7 @@ export default function MapView({
             <Polyline
               positions={linePositions}
               pathOptions={{
-                color: '#e30613',
+                color: routeColor,
                 weight: 4,
                 opacity: 0.9,
                 lineJoin: 'round',

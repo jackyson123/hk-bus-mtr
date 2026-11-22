@@ -62,6 +62,10 @@ export default function App() {
   const [stopNameQuery, setStopNameQuery] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const [nearbyEtas, setNearbyEtas] = useState<Record<string, EtaItem[]>>({})
+  const [nearbyEtaStatus, setNearbyEtaStatus] = useState<
+    Record<string, 'loading' | 'retry' | 'ok' | 'error'>
+  >({})
+  const [nearbyReloadKey, setNearbyReloadKey] = useState(0)
   const [nearbyEtaLoading, setNearbyEtaLoading] = useState(false)
   const [routeFare, setRouteFare] = useState<number | null>(null)
   const [nearestStopId, setNearestStopId] = useState<string | null>(null)
@@ -150,37 +154,135 @@ export default function App() {
     setNearby(list)
   }, [lat, lng, allKmbStops])
 
-  // 附近：每個站載入有咩巴士
+  // 附近：分批（併發上限 4）載入每個站嘅到站，失敗自動重試
   useEffect(() => {
-    if (busMode !== 'nearby' || !nearby.length) {
+    if (busMode !== 'nearby') return
+    const top = nearby.slice(0, 12)
+    if (!top.length) {
       setNearbyEtas({})
+      setNearbyEtaStatus({})
       return
     }
+
     let cancelled = false
-    ;(async () => {
-      setNearbyEtaLoading(true)
-      const top = nearby.slice(0, 12)
-      const map: Record<string, EtaItem[]> = {}
-      await Promise.all(
-        top.map(async (s) => {
-          try {
-            const etas = await getKmbStopEta(s.id)
-            // 保留多班（每線通常 2–3 班）
-            if (!cancelled) map[s.id] = etas.slice(0, 24)
-          } catch {
-            if (!cancelled) map[s.id] = []
+    let periodic: number | undefined
+    let quickRefreshUsed = 0
+    const timers: number[] = []
+    const failedIds = new Set<string>()
+    const allIds = top.map((s) => s.id)
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const t = window.setTimeout(resolve, ms)
+        timers.push(t)
+      })
+
+    /** 單站：成功即寫入；失敗等 1.5s / 3s 再試，最多 3 次 */
+    const tryStop = async (id: string): Promise<'ok' | 'fail'> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (cancelled) return 'fail'
+        if (attempt > 0) {
+          setNearbyEtaStatus((prev) => ({ ...prev, [id]: 'retry' }))
+          await sleep(1500 * attempt)
+          if (cancelled) return 'fail'
+        }
+        try {
+          const etas = await getKmbStopEta(id)
+          if (cancelled) return 'fail'
+          // 保留多班（每線通常 2–3 班）
+          setNearbyEtas((prev) => ({ ...prev, [id]: etas.slice(0, 24) }))
+          setNearbyEtaStatus((prev) => ({ ...prev, [id]: 'ok' }))
+          failedIds.delete(id)
+          // 有路線當刻攞唔到時間（eta = null）：稍後再刷新一次
+          if (
+            quickRefreshUsed < 1 &&
+            (etas.length === 0 || etas.some((e) => !e.eta))
+          ) {
+            quickRefreshUsed++
+            timers.push(
+              window.setTimeout(() => {
+                if (!cancelled) runRound(allIds)
+              }, 8000)
+            )
           }
-        })
-      )
-      if (!cancelled) {
-        setNearbyEtas({ ...map })
-        setNearbyEtaLoading(false)
+          return 'ok'
+        } catch {
+          /* 下一輪再試 */
+        }
       }
-    })()
+      if (!cancelled) {
+        failedIds.add(id)
+        setNearbyEtaStatus((prev) => ({ ...prev, [id]: 'error' }))
+      }
+      return 'fail'
+    }
+
+    /** 一輪：最多 4 個請求同時進行 */
+    const runRound = async (
+      ids: string[],
+      opts: { first?: boolean } = {}
+    ): Promise<number> => {
+      if (cancelled || !ids.length) return 0
+      if (opts.first) setNearbyEtaLoading(true)
+      setNearbyEtaStatus((prev) => {
+        const next = { ...prev }
+        for (const id of ids) {
+          if (next[id] !== 'ok') next[id] = next[id] === 'error' ? 'loading' : next[id] || 'loading'
+        }
+        return next
+      })
+      let cursor = 0
+      let fails = 0
+      const workers = Array.from(
+        { length: Math.min(4, ids.length) },
+        async () => {
+          while (!cancelled) {
+            const i = cursor++
+            if (i >= ids.length) return
+            const res = await tryStop(ids[i])
+            if (res === 'fail') fails++
+          }
+        }
+      )
+      await Promise.all(workers)
+      if (opts.first && !cancelled) setNearbyEtaLoading(false)
+      return fails
+    }
+
+    /** 整輪失敗站再掃一次（最多兩轉，唔會無限 loop） */
+    let extraSweeps = 0
+    const sweepFailed = async () => {
+      if (cancelled || extraSweeps >= 2) return
+      const ids = [...failedIds]
+      if (!ids.length) return
+      extraSweeps++
+      timers.push(
+        window.setTimeout(async () => {
+          if (cancelled) return
+          const fails = await runRound(ids)
+          if (!cancelled && (fails > 0 || failedIds.size > 0)) sweepFailed()
+        }, 6000)
+      )
+    }
+
+    const start = async () => {
+      const fails = await runRound(allIds, { first: true })
+      if (cancelled) return
+      if (fails > 0) sweepFailed()
+      // 定時刷新（保留現有資料，唔會閃白）
+      periodic = window.setInterval(() => {
+        if (!cancelled) runRound(allIds)
+      }, 25000)
+    }
+    start()
+
     return () => {
       cancelled = true
+      if (periodic) window.clearInterval(periodic)
+      timers.forEach((t) => window.clearTimeout(t))
     }
-  }, [busMode, nearby])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busMode, nearby, nearbyReloadKey])
 
   // 路線模式：定時自動更新各站到站（唔使手動）
   useEffect(() => {
@@ -319,6 +421,17 @@ export default function App() {
     if (stop.operator === 'KMB') setCtbFocusRoute(null)
   }
 
+  /** 跳去路線站行：重試幾次，等班次資料載入後版面穩定再置中 */
+  const scrollToRouteStop = (seq: number) => {
+    ;[350, 1200, 2100].forEach((delay) => {
+      window.setTimeout(() => {
+        document
+          .getElementById(`route-stop-${seq}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, delay)
+    })
+  }
+
   const handleSelectRouteStop = (item: RouteStopItem) => {
     const stop: BusStop = {
       id: item.stopId,
@@ -386,12 +499,125 @@ export default function App() {
     }
   }
 
+  /**
+   * 「附近」撳車號：自動查路線、自動揀中包含該附近站嘅方向，
+   * 再跳去該站並高亮（唔使用戶自己揀方向）。
+   */
+  const openRouteAtStop = async (
+    routeNo: string,
+    operator: 'KMB' | 'CTB',
+    fromStop: BusStop
+  ) => {
+    const q = routeNo.trim().toUpperCase()
+    if (!q) return
+    setBusMode('route')
+    setRouteQuery(q)
+    setRouteLoading(true)
+    setRouteError(null)
+    setVariants([])
+    setDirectionGroups([])
+    setActivePartners([])
+    setSelectedVariant(null)
+    setRouteStops([])
+    setRouteEtaBySeq({})
+    setSelectedStop(null)
+    setEtas([])
+    setRouteFare(null)
+    setNearestStopId(null)
+    setShowAllAtStop(false)
+    setSectionFares(null)
+    try {
+      const list = await searchRouteVariants(q)
+      if (!list.length) {
+        setRouteError(
+          lang === 'tc'
+            ? `找不到路線 ${q}（九巴 / 城巴）`
+            : `Route ${q} not found (KMB / CTB)`
+        )
+        return
+      }
+      setVariants(list)
+      const groups = groupVariantsByDirection(list)
+      setDirectionGroups(groups)
+
+      // 逐個方向比對站序：用座標找最接近呢個附近站嘅站點（150m 內）
+      const preferred = list.filter((v) => v.operator === operator)
+      const pool = preferred.length ? preferred : list
+      let best: {
+        v: RouteVariant
+        partners: RouteVariant[]
+        seq: number
+        d: number
+      } | null = null
+      const tried = new Set<string>()
+      for (const v of pool) {
+        const variantKey = `${v.operator}|${v.bound}|${v.service_type}`
+        if (tried.has(variantKey)) continue
+        tried.add(variantKey)
+        try {
+          const stops = await loadRouteStops(v, kmbStopMap)
+          for (const s of stops) {
+            if (!s.lat || !s.lng) continue
+            const d = haversine(fromStop.lat, fromStop.lng, s.lat, s.lng)
+            if (d > 150) continue
+            if (best && d >= best.d) continue
+            const g = groups.find((gr) =>
+              gr.partners.some(
+                (p) =>
+                  p.operator === v.operator &&
+                  p.bound === v.bound &&
+                  p.service_type === v.service_type
+              )
+            )
+            best = { v, partners: g?.partners ?? [v], seq: s.seq, d }
+          }
+        } catch {
+          /* 試下一個方向 */
+        }
+      }
+
+      if (best) {
+        await pickVariant(best.v, best.partners, best.seq)
+        showToast(
+          lang === 'tc'
+            ? `${q} · 已跳去 ${fromStop.name_tc}`
+            : `${q} · jumped to ${fromStop.name_en}`
+        )
+      } else {
+        // 搵唔到吻合方向：至少載入同一間公司嘅方向，唔使由零開始
+        const fallback = pool[0]
+        const g = groups.find((gr) =>
+          gr.partners.some(
+            (p) =>
+              p.operator === fallback.operator &&
+              p.bound === fallback.bound &&
+              p.service_type === fallback.service_type
+          )
+        )
+        await pickVariant(fallback, g?.partners ?? [fallback])
+        showToast(
+          lang === 'tc'
+            ? '搵唔到對應方向，請自己揀'
+            : 'Could not match direction — pick one'
+        )
+      }
+    } catch (e: any) {
+      setRouteError(e.message || 'Search failed')
+    } finally {
+      setRouteLoading(false)
+    }
+  }
+
   const pickDirection = async (g: DirectionGroup) => {
     setActivePartners(g.partners)
     await pickVariant(g.primary, g.partners)
   }
 
-  const pickVariant = async (v: RouteVariant, partners?: RouteVariant[]) => {
+  const pickVariant = async (
+    v: RouteVariant,
+    partners?: RouteVariant[],
+    focusSeq?: number
+  ) => {
     const allPartners =
       partners && partners.length
         ? partners
@@ -442,6 +668,16 @@ export default function App() {
         setNearestStopId(null)
       }
 
+      // 由「附近」撳車號：自動跳去該站並高亮，順便開埋該站嘅實時到站
+      if (focusSeq != null) {
+        const target = stops.find((s) => s.seq === focusSeq)
+        if (target) {
+          handleSelectRouteStop(target)
+          setShowAllAtStop(true)
+          scrollToRouteStop(focusSeq)
+        }
+      }
+
       try {
         const fare = await getFullFare(v.operator, v.route, v.bound)
         setRouteFare(fare)
@@ -460,12 +696,14 @@ export default function App() {
         setSectionFares(null)
       }
       // 等 list render 後 scroll 到最近站
-      window.setTimeout(() => {
-        nearestStopRef.current?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-        })
-      }, 350)
+      if (focusSeq == null) {
+        window.setTimeout(() => {
+          nearestStopRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          })
+        }, 350)
+      }
 
       // 自動載入各站到站時間，失敗會自動重試
       const loadRouteEtas = async (): Promise<boolean> => {
@@ -749,7 +987,13 @@ export default function App() {
       </header>
 
       {/* ─────────── Main ─────────── */}
-      <main className="relative mx-auto flex w-full max-w-[1720px] flex-1 min-h-0 flex-col overflow-y-auto md:grid md:grid-cols-[320px_minmax(0,1fr)] md:grid-rows-[300px_minmax(0,1fr)] md:overflow-hidden xl:grid-cols-[330px_minmax(0,1fr)_minmax(360px,31%)] xl:grid-rows-1">
+      <main
+        className={`relative mx-auto flex w-full max-w-[1720px] flex-1 min-h-0 flex-col overflow-y-auto md:overflow-hidden ${
+          tab === 'mtr'
+            ? ''
+            : 'md:grid md:grid-cols-[320px_minmax(0,1fr)] md:grid-rows-[300px_minmax(0,1fr)] xl:grid-cols-[330px_minmax(0,1fr)_minmax(360px,31%)] xl:grid-rows-1'
+        }`}
+      >
         {tab === 'mtr' ? (
           <MtrPanel lang={lang} />
         ) : (
@@ -1287,10 +1531,21 @@ export default function App() {
               {/* Nearby filter */}
               {busMode === 'nearby' && (
                 <div className={sideCard}>
-                  <p className="label-cap mb-2 flex items-center gap-1.5">
-                    <IconWalk className="h-3.5 w-3.5" />
-                    {lang === 'tc' ? '附近車站' : 'Nearby stops'}
-                  </p>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="label-cap flex items-center gap-1.5">
+                      <IconWalk className="h-3.5 w-3.5" />
+                      {lang === 'tc' ? '附近車站' : 'Nearby stops'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setNearbyReloadKey((k) => k + 1)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1 text-[10px] font-semibold text-stone-600 transition hover:text-stone-900"
+                      title={lang === 'tc' ? '重新載入附近到站' : 'Reload nearby arrivals'}
+                    >
+                      <IconRefresh className="h-3 w-3" />
+                      {lang === 'tc' ? '更新' : 'Refresh'}
+                    </button>
+                  </div>
                   <input
                     type="search"
                     value={nearbyFilter}
@@ -1480,9 +1735,14 @@ export default function App() {
                             : Infinity
                           return ta - tb
                         })
+                        const etaStatus = nearbyEtaStatus[s.id]
+                        const busy =
+                          etaStatus === 'loading' || etaStatus === 'retry'
+                        const failed = etaStatus === 'error'
                         return (
                           <div
                             key={s.id}
+                            data-stop-id={s.id}
                             className={`group flex flex-col rounded-2xl border bg-white p-3.5 text-left transition ${
                               selectedStop?.id === s.id
                                 ? 'border-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.12)]'
@@ -1498,9 +1758,26 @@ export default function App() {
                                 <span className="block truncate text-[15px] font-bold leading-snug">
                                   {lang === 'tc' ? s.name_tc : s.name_en}
                                 </span>
-                                <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                                <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-emerald-700">
                                   <IconWalk className="h-3 w-3" />
                                   {Math.round(s.distance)} m
+                                  {busy && (
+                                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[9px] font-bold text-stone-600">
+                                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-stone-400" />
+                                      {etaStatus === 'retry'
+                                        ? lang === 'tc'
+                                          ? '重試中'
+                                          : 'Retrying'
+                                        : lang === 'tc'
+                                        ? '更新中'
+                                        : 'Loading'}
+                                    </span>
+                                  )}
+                                  {failed && (
+                                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                                      ↻ {lang === 'tc' ? '自動重試中' : 'Retrying'}
+                                    </span>
+                                  )}
                                 </span>
                               </span>
                               <IconChevron className="mt-1 h-4 w-4 flex-shrink-0 text-stone-300 transition group-hover:translate-x-0.5 group-hover:text-stone-500" />
@@ -1508,12 +1785,30 @@ export default function App() {
 
                             <div className="mt-2.5 space-y-1.5">
                               {groups.length === 0 ? (
-                                <p className="text-xs text-stone-500">
-                                  {nearbyEtaLoading
-                                    ? '…'
-                                    : lang === 'tc'
-                                    ? '暫無到站'
-                                    : 'No ETA'}
+                                <p className="flex items-center gap-1.5 text-xs text-stone-500">
+                                  {busy ? (
+                                    <>
+                                      <span className="h-2 w-2 animate-pulse rounded-full bg-stone-300" />
+                                      {etaStatus === 'retry'
+                                        ? lang === 'tc'
+                                          ? '連線唔穩，重試中…'
+                                          : 'Connection issue — retrying…'
+                                        : lang === 'tc'
+                                        ? '載入到站時間…'
+                                        : 'Loading arrivals…'}
+                                    </>
+                                  ) : failed ? (
+                                    <>
+                                      <span className="animate-spin text-[11px] text-amber-600">
+                                        ↻
+                                      </span>
+                                      {lang === 'tc'
+                                        ? '暫時攞唔到，會自動再試'
+                                        : 'Couldn’t load — retrying automatically'}
+                                    </>
+                                  ) : (
+                                    <>{lang === 'tc' ? '暫無到站' : 'No ETA'}</>
+                                  )}
                                 </p>
                               ) : (
                                 groups.slice(0, 6).map((g) => (
@@ -1525,12 +1820,16 @@ export default function App() {
                                       type="button"
                                       title={
                                         lang === 'tc'
-                                          ? `查路線 ${g.route}`
-                                          : `Search route ${g.route}`
+                                          ? `查 ${g.route}，自動跳去 ${s.name_tc} 呢站`
+                                          : `Open ${g.route}, jump to this stop`
                                       }
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        onSearchRoute(g.route)
+                                        openRouteAtStop(
+                                          g.route,
+                                          g.operator === 'CTB' ? 'CTB' : 'KMB',
+                                          s
+                                        )
                                       }}
                                       className={`w-11 flex-shrink-0 rounded-md py-0.5 text-center text-[10px] font-bold text-white ${
                                         g.operator === 'KMB'
@@ -1544,7 +1843,11 @@ export default function App() {
                                       type="button"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        onSearchRoute(g.route)
+                                        openRouteAtStop(
+                                          g.route,
+                                          g.operator === 'CTB' ? 'CTB' : 'KMB',
+                                          s
+                                        )
                                       }}
                                       className="min-w-0 flex-1 truncate text-left text-[11px] font-medium text-stone-600 hover:text-stone-900"
                                     >
@@ -1621,11 +1924,12 @@ export default function App() {
                                 return (
                                   <div
                                     key={`${s.operator}-${s.stopId}-${s.seq}`}
+                                    id={`route-stop-${s.seq}`}
                                     className={`fade-up grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 border-b border-stone-100 px-3 py-2.5 transition last:border-0 md:px-4 lg:grid-cols-[2.25rem_minmax(0,1fr)_3.75rem_13rem_4.5rem] lg:gap-x-3 ${
-                                      isNearest
+                                      selectedStop?.id === s.stopId
+                                        ? 'bg-emerald-50/70 shadow-[inset_3px_0_0_0_#10b981]'
+                                        : isNearest
                                         ? 'bg-amber-50/80'
-                                        : selectedStop?.id === s.stopId
-                                        ? 'bg-emerald-50/70'
                                         : 'hover:bg-stone-50'
                                     }`}
                                   >
@@ -1666,7 +1970,13 @@ export default function App() {
                                     <div className="col-span-2 col-start-2 row-start-2 flex flex-wrap items-center gap-1.5 lg:col-span-1 lg:col-start-4 lg:row-start-1 lg:flex-nowrap">
                                       {times.length === 0 ? (
                                         <span className="text-[11px] text-stone-400">
-                                          {lang === 'tc' ? '載入中…' : 'Loading…'}
+                                          {Object.keys(routeEtaBySeq).length === 0
+                                            ? lang === 'tc'
+                                              ? '載入中…'
+                                              : 'Loading…'
+                                            : lang === 'tc'
+                                            ? '暫無到站'
+                                            : 'No ETA'}
                                         </span>
                                       ) : (
                                         times.map((tm, i) => (
