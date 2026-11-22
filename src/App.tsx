@@ -1854,7 +1854,8 @@ export default function App() {
                                       → {lang === 'tc' ? g.dest_tc : g.dest_en}
                                     </button>
                                     <span className="flex flex-shrink-0 items-center gap-1">
-                                      {[0, 1, 2].map((i) => {
+                                      {g.times.some((t) => t.eta) ? (
+                                        [0, 1, 2].map((i) => {
                                         const e = g.times[i]
                                         return (
                                           <span
@@ -1870,7 +1871,12 @@ export default function App() {
                                             {e ? formatEta(e.eta, lang) : '–'}
                                           </span>
                                         )
-                                      })}
+                                        })
+                                      ) : (
+                                        <span className="min-w-[5.5rem] text-right text-[10px] font-medium text-stone-400">
+                                          {lang === 'tc' ? '暫無班次' : 'No service'}
+                                        </span>
+                                      )}
                                     </span>
                                   </div>
                                 ))
