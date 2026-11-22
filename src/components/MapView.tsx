@@ -21,7 +21,14 @@ const userIcon = L.divIcon({
 
 const stopIcon = (op: string, selected?: boolean, seq?: number) => {
   const size = selected ? 24 : seq != null ? 21 : 15
-  const bg = op === 'KMB' ? '#e30613' : op === 'CTB' ? '#0066b3' : '#9d2d2d'
+  const bg =
+    op === 'KMB'
+      ? '#e30613'
+      : op === 'CTB'
+      ? '#0066b3'
+      : op === 'GMB'
+      ? '#0B7A3B'
+      : '#9d2d2d'
   const ring = selected
     ? '0 0 0 3px rgba(16,185,129,0.35),0 1px 4px rgba(0,0,0,0.4)'
     : '0 1px 4px rgba(0,0,0,0.35)'
@@ -35,6 +42,27 @@ const stopIcon = (op: string, selected?: boolean, seq?: number) => {
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   })
+}
+
+/** Leaflet 要知容器大細；隱藏→顯示（手機開地圖）或視窗改變時要重新量度 */
+function AutoResize() {
+  const map = useMap()
+  useEffect(() => {
+    const el = map.getContainer()
+    const fix = () => map.invalidateSize()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fix) : null
+    ro?.observe(el)
+    const t1 = window.setTimeout(fix, 120)
+    const t2 = window.setTimeout(fix, 600)
+    window.addEventListener('resize', fix)
+    return () => {
+      ro?.disconnect()
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+      window.removeEventListener('resize', fix)
+    }
+  }, [map])
+  return null
 }
 
 function Recenter({ lat, lng }: { lat: number; lng: number }) {
@@ -144,6 +172,7 @@ export default function MapView({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
         <ZoomControl position="bottomleft" />
+        <AutoResize />
 
         {fitToStops && stops.length > 0 && (
           <FitToStops stops={stops} fitKey={fitKey || String(stops.length)} />

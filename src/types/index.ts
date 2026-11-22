@@ -1,6 +1,6 @@
 export type Lang = 'tc' | 'en'
 
-export type Operator = 'KMB' | 'CTB' | 'MTR'
+export type Operator = 'KMB' | 'CTB' | 'MTR' | 'GMB'
 
 export interface BusStop {
   id: string

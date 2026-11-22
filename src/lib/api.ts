@@ -6,7 +6,7 @@ const MTR_BASE = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php'
 
 /** GET JSON with a couple of automatic retries — open-data endpoints
  *  (esp. data.etabus.gov.hk) intermittently drop requests / CORS headers. */
-async function fetchJson<T>(url: string): Promise<T> {
+export async function fetchJson<T>(url: string): Promise<T> {
   let lastErr: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

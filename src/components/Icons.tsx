@@ -62,6 +62,18 @@ export function IconBus(p: P) {
   )
 }
 
+export function IconMinibus(p: P) {
+  return (
+    <svg {...base} {...p}>
+      <path d="M3 16.5V10a2 2 0 0 1 2-2h7.6c.9 0 1.7.4 2.2 1.1l2.4 3.1H19a2 2 0 0 1 2 2v2.3" />
+      <path d="M3 16.5h1.6M8.9 16.5h6.2M18.6 16.5H21" />
+      <circle cx="7.2" cy="17.6" r="1.5" />
+      <circle cx="16.8" cy="17.6" r="1.5" />
+      <path d="M4.2 12.4h6.6M12.6 12.4h2.2" />
+    </svg>
+  )
+}
+
 export function IconTrain(p: P) {
   return (
     <svg {...base} {...p}>

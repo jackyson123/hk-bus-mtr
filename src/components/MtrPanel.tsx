@@ -7,11 +7,22 @@ import {
 } from '../lib/mtrData'
 import { getMtrSchedule } from '../lib/api'
 import MapView from './MapView'
-import { IconMap, IconRefresh, IconTrain } from './Icons'
+import { IconMap, IconRefresh, IconTrain, IconStar, IconChevron } from './Icons'
 import type { Lang, MtrSchedule, BusStop } from '../types'
+import type { FavMtr } from '../lib/favorites'
 
 interface Props {
   lang: Lang
+  /** 目前選中嘅線／站（由 App 控制，方便由收藏一鍵跳入） */
+  line: string
+  station: string
+  onSelect: (line: string, station: string) => void
+  favMtr: FavMtr[]
+  isMtrFav: (v: { line: string; station: string }) => boolean
+  toggleMtrFav: (item: Omit<FavMtr, 'savedAt'>) => void
+  removeMtrFav: (v: { line: string; station: string }) => void
+  showToast: (msg: string) => void
+  onOpenFavorites: () => void
 }
 
 function pad2(n: number): string {
@@ -38,9 +49,18 @@ function arrival(t: MtrSchedule): {
   return { arriving, minutes, clock }
 }
 
-export default function MtrPanel({ lang }: Props) {
-  const [line, setLine] = useState('TCL')
-  const [station, setStation] = useState('HOK')
+export default function MtrPanel({
+  lang,
+  line,
+  station,
+  onSelect,
+  favMtr,
+  isMtrFav,
+  toggleMtrFav,
+  removeMtrFav,
+  showToast,
+  onOpenFavorites,
+}: Props) {
   const [up, setUp] = useState<MtrSchedule[]>([])
   const [down, setDown] = useState<MtrSchedule[]>([])
   const [isDelay, setIsDelay] = useState(false)
@@ -59,6 +79,22 @@ export default function MtrPanel({ lang }: Props) {
       ? currentStation.name_tc
       : currentStation.name_en
     : ''
+
+  const setLine = useCallback(
+    (code: string) => {
+      const list = MTR_STATIONS[code] || []
+      const keep = list.some((s) => s.code === station) ? station : list[0]?.code
+      if (keep) onSelect(code, keep)
+    },
+    [onSelect, station]
+  )
+
+  const setStation = useCallback(
+    (code: string) => {
+      onSelect(line, code)
+    },
+    [onSelect, line]
+  )
 
   const load = useCallback(async (): Promise<boolean> => {
     if (!line || !station) return false
@@ -115,9 +151,9 @@ export default function MtrPanel({ lang }: Props) {
   useEffect(() => {
     const list = MTR_STATIONS[line] || []
     if (list.length && !list.find((s) => s.code === station)) {
-      setStation(list[0].code)
+      onSelect(line, list[0].code)
     }
-  }, [line, station])
+  }, [line, station, onSelect])
 
   const upLabel = useMemo(() => {
     const dests = [...new Set(up.map((t) => t.dest).filter(Boolean))]
@@ -162,6 +198,88 @@ export default function MtrPanel({ lang }: Props) {
         }),
     [stations]
   )
+
+  const isCurrentFav = isMtrFav({ line, station })
+
+  const toggleCurrentFav = () => {
+    if (!currentLine || !currentStation) return
+    toggleMtrFav({
+      line,
+      station,
+      line_tc: currentLine.name_tc,
+      line_en: currentLine.name_en,
+      station_tc: currentStation.name_tc,
+      station_en: currentStation.name_en,
+      color: currentLine.color,
+    })
+    showToast(
+      isCurrentFav
+        ? lang === 'tc'
+          ? '已取消收藏'
+          : 'Removed favourite'
+        : lang === 'tc'
+        ? '已收藏港鐵站'
+        : 'Saved MTR station'
+    )
+  }
+
+  const gotoFav = (f: FavMtr) => {
+    onSelect(f.line, f.station)
+    showToast(
+      lang === 'tc'
+        ? `已跳去 ${f.line_tc} · ${f.station_tc}`
+        : `Jumped to ${f.line_en} · ${f.station_en}`
+    )
+  }
+
+  /** 收藏車站嘅小晶片（線色點 + 線名簡寫 · 站名） */
+  const renderFavChip = (f: FavMtr, compact?: boolean) => {
+    const activeFav = f.line === line && f.station === station
+    return (
+      <div
+        key={`${f.line}-${f.station}`}
+        className={`flex items-center gap-0.5 rounded-lg border pr-0.5 transition ${
+          activeFav
+            ? 'border-stone-900 bg-stone-900 text-white'
+            : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => gotoFav(f)}
+          className="flex min-w-0 items-center gap-1.5 px-2 py-1.5 text-left text-[11px] font-semibold"
+          title={`${f.line_tc} · ${f.station_tc}`}
+        >
+          <span
+            className="h-2 w-2 flex-shrink-0 rounded-full"
+            style={{ background: activeFav ? '#fff' : f.color }}
+          />
+          <span className="truncate">
+            {compact
+              ? lang === 'tc'
+                ? f.station_tc
+                : f.station_en
+              : lang === 'tc'
+              ? `${f.line_tc.replace('綫', '')} · ${f.station_tc}`
+              : `${f.line_en} · ${f.station_en}`}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => removeMtrFav({ line: f.line, station: f.station })}
+          className={`px-1 py-1 text-[10px] transition ${
+            activeFav
+              ? 'text-white/60 hover:text-white'
+              : 'text-stone-300 hover:text-stone-700'
+          }`}
+          title={lang === 'tc' ? '移除' : 'Remove'}
+          aria-label={lang === 'tc' ? '移除收藏' : 'Remove favourite'}
+        >
+          ✕
+        </button>
+      </div>
+    )
+  }
 
   /** 一個方向：標題 + 班次卡（手機單欄、電腦兩欄） */
   const renderDirection = (list: MtrSchedule[], title: string) => (
@@ -265,12 +383,12 @@ export default function MtrPanel({ lang }: Props) {
   )
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:h-full md:flex-row md:gap-3 md:overflow-hidden md:p-4 xl:grid xl:grid-cols-[310px_minmax(0,1fr)_minmax(360px,30%)] xl:grid-rows-1">
+    <div data-testid="mtr-panel" className="flex min-h-0 flex-1 flex-col md:h-full md:flex-row md:gap-3 md:overflow-hidden md:p-4 xl:grid xl:grid-cols-[310px_minmax(0,1fr)_minmax(360px,30%)] xl:grid-rows-1">
       {/* ─────────── 路線／車站選擇 ─────────── */}
-      <aside className="flex-shrink-0 md:flex md:w-[286px] md:min-h-0 md:flex-col md:gap-3 md:overflow-hidden xl:w-auto">
+      <aside data-testid="mtr-aside" className="flex-shrink-0 md:flex md:w-[286px] md:min-h-0 md:flex-col md:gap-3 md:overflow-hidden xl:w-auto">
         {/* 手機：沿用原有操作條 */}
         <div className="md:hidden">
-          <div className="sticky top-[56px] z-30 border-b border-stone-200/70 bg-[#f5f4f2]/95 px-3 pb-2.5 pt-3 backdrop-blur">
+          <div className="sticky top-0 z-30 border-b border-stone-200/70 bg-[#f5f4f2]/95 px-3 pb-2.5 pt-3 backdrop-blur">
             <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
               {MTR_LINES.map((l) => {
                 const active = line === l.code
@@ -309,6 +427,16 @@ export default function MtrPanel({ lang }: Props) {
               ))}
             </select>
 
+            {favMtr.length > 0 && (
+              <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-1">
+                {favMtr.map((f) => (
+                  <div key={`${f.line}-${f.station}`} className="flex-shrink-0">
+                    {renderFavChip(f)}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="mt-2.5 flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-bold">
@@ -330,6 +458,27 @@ export default function MtrPanel({ lang }: Props) {
                 </p>
               </div>
               <div className="flex flex-shrink-0 gap-1.5">
+                <button
+                  type="button"
+                  onClick={toggleCurrentFav}
+                  className={`inline-flex items-center justify-center rounded-xl border px-2 py-2 transition ${
+                    isCurrentFav
+                      ? 'border-amber-300 bg-amber-50 text-amber-600'
+                      : 'border-stone-200 bg-white text-stone-500'
+                  }`}
+                  title={
+                    isCurrentFav
+                      ? lang === 'tc'
+                        ? '已收藏，撳一下取消'
+                        : 'Saved — tap to remove'
+                      : lang === 'tc'
+                      ? '收藏此站'
+                      : 'Save this station'
+                  }
+                  aria-label={lang === 'tc' ? '收藏此站' : 'Save this station'}
+                >
+                  <IconStar className="h-4 w-4" filled={isCurrentFav} />
+                </button>
                 <button
                   type="button"
                   onClick={load}
@@ -389,6 +538,34 @@ export default function MtrPanel({ lang }: Props) {
             </div>
           </section>
 
+          <section className="rounded-2xl border border-stone-200/80 bg-white p-3 shadow-card">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="label-cap flex items-center gap-1.5">
+                <IconStar className="h-3.5 w-3.5" filled />
+                {lang === 'tc' ? '收藏車站' : 'Saved stations'}
+              </p>
+              <button
+                type="button"
+                onClick={onOpenFavorites}
+                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-stone-500 transition hover:text-stone-900"
+              >
+                {lang === 'tc' ? '全部收藏' : 'All'}
+                <IconChevron className="h-3 w-3" />
+              </button>
+            </div>
+            {favMtr.length === 0 ? (
+              <p className="text-[11px] leading-relaxed text-stone-500">
+                {lang === 'tc'
+                  ? '揀好線同站之後，撳站名旁邊嘅 ☆ 就可以收藏，下次一撳跳返嚟。'
+                  : 'Pick a line and station, then tap ☆ to save it for one-tap access.'}
+              </p>
+            ) : (
+              <div className="flex max-h-[22vh] flex-wrap gap-1.5 overflow-y-auto pr-0.5">
+                {favMtr.map((f) => renderFavChip(f))}
+              </div>
+            )}
+          </section>
+
           <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-stone-200/80 bg-white p-3 shadow-card">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <p className="label-cap flex items-center gap-1.5">
@@ -439,9 +616,9 @@ export default function MtrPanel({ lang }: Props) {
         </div>
       </aside>
 
-      <div className="flex min-h-0 flex-1 flex-col xl:contents">
+      <div data-testid="mtr-body" className="flex min-h-0 flex-1 flex-col xl:contents">
         {/* ─────────── 實時班次 ─────────── */}
-        <section className="flex min-h-0 flex-col px-3 pt-4 md:overflow-y-auto md:px-0 md:pr-1 md:pt-0">
+        <section data-testid="mtr-board" className="flex min-h-0 flex-col px-3 pt-4 md:overflow-y-auto md:px-0 md:pr-1 md:pt-0">
         <div className="mb-3 hidden items-center justify-between gap-3 rounded-2xl border border-stone-200/80 bg-white px-4 py-3 shadow-card md:flex">
           <div className="flex min-w-0 items-center gap-3">
             <span
@@ -482,6 +659,34 @@ export default function MtrPanel({ lang }: Props) {
             </div>
             <button
               type="button"
+              onClick={toggleCurrentFav}
+              className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-semibold transition ${
+                isCurrentFav
+                  ? 'border-amber-300 bg-amber-50 text-amber-700'
+                  : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300'
+              }`}
+              title={
+                isCurrentFav
+                  ? lang === 'tc'
+                    ? '已收藏，撳一下取消'
+                    : 'Saved — tap to remove'
+                  : lang === 'tc'
+                  ? '收藏此站'
+                  : 'Save this station'
+              }
+              aria-label={lang === 'tc' ? '收藏此站' : 'Save this station'}
+            >
+              <IconStar className="h-4 w-4" filled={isCurrentFav} />
+              {lang === 'tc'
+                ? isCurrentFav
+                  ? '已收藏'
+                  : '收藏'
+                : isCurrentFav
+                ? 'Saved'
+                : 'Save'}
+            </button>
+            <button
+              type="button"
               onClick={load}
               className="btn-ghost px-2.5 py-2"
               title={lang === 'tc' ? '更新' : 'Refresh'}
@@ -520,6 +725,7 @@ export default function MtrPanel({ lang }: Props) {
 
       {/* ─────────── 路綫圖 ─────────── */}
       <div
+        data-testid="mtr-map"
         className={`${
           mapOpen ? 'block' : 'hidden'
         } flex-shrink-0 px-3 pt-3 md:block md:min-h-[220px] md:flex-1 md:px-0 md:pt-0 xl:flex-none`}

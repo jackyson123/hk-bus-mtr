@@ -4,6 +4,8 @@ import type { RouteVariant } from './api'
 const STOPS_KEY = 'hk-bus-mtr-fav-stops'
 const ROUTES_KEY = 'hk-bus-mtr-fav-routes'
 const ROUTE_STOPS_KEY = 'hk-bus-mtr-fav-route-stops'
+const GMB_KEY = 'hk-bus-mtr-fav-gmb'
+const MTR_KEY = 'hk-bus-mtr-fav-mtr'
 
 export interface FavStop {
   id: string
@@ -70,7 +72,7 @@ export function stopToFav(stop: BusStop): FavStop {
     name_en: stop.name_en,
     lat: stop.lat,
     lng: stop.lng,
-    operator: stop.operator,
+    operator: stop.operator as FavStop['operator'],
     savedAt: Date.now(),
   }
 }
@@ -140,4 +142,64 @@ export function favKeyRouteStop(v: {
   stopId: string
 }) {
   return `${v.operator}:${v.route}:${v.bound}:${v.service_type}:${v.stopId}`
+}
+
+/* ------------------------------------------------------------------ */
+/* 綠色專線小巴（小巴路線 + 方向 + 站）                                  */
+/* ------------------------------------------------------------------ */
+
+export interface FavGmb {
+  region: string // HKI / KLN / NT
+  routeId: number
+  routeSeq: number
+  routeCode: string
+  dest_tc: string
+  dest_en: string
+  orig_tc: string
+  orig_en: string
+  stopId: number
+  stopSeq: number
+  stopName_tc: string
+  stopName_en: string
+  fare: number | null
+  savedAt: number
+}
+
+export function loadFavGmb(): FavGmb[] {
+  return readJson<FavGmb[]>(GMB_KEY, [])
+}
+
+export function saveFavGmb(list: FavGmb[]) {
+  writeJson(GMB_KEY, list)
+}
+
+export function favKeyGmb(v: { routeId: number; routeSeq: number; stopId: number }) {
+  return `${v.routeId}:${v.routeSeq}:${v.stopId}`
+}
+
+/* ------------------------------------------------------------------ */
+/* 港鐵（線 + 站）                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface FavMtr {
+  line: string
+  station: string
+  line_tc: string
+  line_en: string
+  station_tc: string
+  station_en: string
+  color: string
+  savedAt: number
+}
+
+export function loadFavMtr(): FavMtr[] {
+  return readJson<FavMtr[]>(MTR_KEY, [])
+}
+
+export function saveFavMtr(list: FavMtr[]) {
+  writeJson(MTR_KEY, list)
+}
+
+export function favKeyMtr(v: { line: string; station: string }) {
+  return `${v.line}:${v.station}`
 }

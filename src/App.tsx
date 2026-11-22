@@ -3,6 +3,8 @@ import type { ComponentType } from 'react'
 import MapView from './components/MapView'
 import EtaList from './components/EtaList'
 import MtrPanel from './components/MtrPanel'
+import GmbPanel from './components/GmbPanel'
+import type { GmbTarget } from './components/GmbPanel'
 import LiveClock from './components/LiveClock'
 import {
   IconPin,
@@ -11,12 +13,16 @@ import {
   IconStar,
   IconBus,
   IconTrain,
+  IconMinibus,
   IconMap,
   IconWalk,
   IconRefresh,
   IconChevron,
 } from './components/Icons'
 import { useGeolocation } from './hooks/useGeolocation'
+import type { FavRoute, FavRouteStop } from './lib/favorites'
+import { regionMeta, regionLabel } from './lib/gmb'
+import type { GmbRegion } from './lib/gmb'
 import { useFavorites } from './hooks/useFavorites'
 import { useReminders } from './hooks/useReminders'
 import {
@@ -39,13 +45,19 @@ import {
 } from './lib/api'
 import type { BusStop, EtaItem, Lang, NearbyStop } from './types'
 
-type Tab = 'bus' | 'mtr'
+type Tab = 'bus' | 'gmb' | 'mtr'
 type BusMode = 'route' | 'nearby' | 'search' | 'favorites'
 
 export default function App() {
   const [lang, setLang] = useState<Lang>('tc')
   const [tab, setTab] = useState<Tab>('bus')
   const [busMode, setBusMode] = useState<BusMode>('route')
+
+  // 港鐵：目前選中嘅線／站（由 App 持有，方便收藏一鍵跳轉）
+  const [mtrLine, setMtrLine] = useState('TCL')
+  const [mtrStation, setMtrStation] = useState('HOK')
+  // 小巴：由收藏跳入嘅目標
+  const [gmbTarget, setGmbTarget] = useState<GmbTarget | null>(null)
 
   // Shared stop / ETA state
   const [selectedStop, setSelectedStop] = useState<BusStop | null>(null)
@@ -99,15 +111,23 @@ export default function App() {
     favStops,
     favRoutes,
     favRouteStops,
+    favGmb,
+    favMtr,
     isStopFav,
     isRouteFav,
     isRouteStopFav,
+    isGmbFav,
+    isMtrFav,
     toggleStop,
     toggleRoute,
     toggleRouteStop,
+    toggleGmb,
+    toggleMtr,
     removeStop,
     removeRoute,
     removeRouteStop,
+    removeGmb,
+    removeMtr,
   } = useFavorites()
 
   const { reminders, addReminder, cancelReminder } = useReminders(lang)
@@ -875,6 +895,65 @@ export default function App() {
     },
     [selectedStop, addReminder, lang, showToast]
   )
+  /** 由收藏跳去「路線 + 方向 + 站」 */
+  const openFavRouteStop = async (rs: FavRouteStop) => {
+    const v: RouteVariant = {
+      operator: rs.operator as 'KMB' | 'CTB',
+      route: rs.route,
+      bound: rs.bound,
+      service_type: rs.service_type,
+      dest_tc: rs.dest_tc,
+      dest_en: rs.dest_en,
+      orig_tc: rs.orig_tc,
+      orig_en: rs.orig_en,
+      label_tc: `${rs.route} → ${rs.dest_tc}`,
+      label_en: `${rs.route} → ${rs.dest_en}`,
+    }
+    let partners: RouteVariant[] = [v]
+    try {
+      if (rs.partnersJson) partners = JSON.parse(rs.partnersJson)
+    } catch {
+      /* ignore */
+    }
+    setBusMode('route')
+    setRouteQuery(rs.route)
+    await pickVariant(v, partners)
+    handleSelectRouteStop({
+      seq: rs.seq,
+      stopId: rs.stopId,
+      name_tc: rs.stopName_tc,
+      name_en: rs.stopName_en,
+      lat: rs.stopLat,
+      lng: rs.stopLng,
+      operator: rs.operator as 'KMB' | 'CTB',
+    })
+    setNearestStopId(rs.stopId)
+    window.setTimeout(() => {
+      nearestStopRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    }, 400)
+  }
+
+  /** 由收藏跳去整條巴士路線 */
+  const openFavRoute = (r: FavRoute) => {
+    setBusMode('route')
+    setRouteQuery(r.route)
+    pickVariant({
+      operator: r.operator,
+      route: r.route,
+      bound: r.bound,
+      service_type: r.service_type,
+      dest_tc: r.dest_tc,
+      dest_en: r.dest_en,
+      orig_tc: r.orig_tc,
+      orig_en: r.orig_en,
+      label_tc: r.label_tc,
+      label_en: r.label_en,
+    })
+  }
+
   const modeItems: {
     mode: BusMode
     label: string
@@ -907,7 +986,7 @@ export default function App() {
                 hk-bus-mtr
               </h1>
               <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
-                {lang === 'tc' ? '九巴 · 城巴 · 港鐵' : 'KMB · Citybus · MTR'}
+                {lang === 'tc' ? '九巴 · 城巴 · 小巴 · 港鐵' : 'KMB · Citybus · GMB · MTR'}
               </p>
             </div>
           </div>
@@ -917,6 +996,7 @@ export default function App() {
             {(
               [
                 ['bus', lang === 'tc' ? '巴士' : 'Bus', IconBus],
+                ['gmb', lang === 'tc' ? '小巴' : 'Minibus', IconMinibus],
                 ['mtr', lang === 'tc' ? '港鐵' : 'MTR', IconTrain],
               ] as const
             ).map(([key, label, Icon]) => (
@@ -930,7 +1010,15 @@ export default function App() {
                 }`}
               >
                 <Icon
-                  className={`h-4 w-4 ${tab === key ? 'text-[#e30613]' : ''}`}
+                  className={`h-4 w-4 ${
+                    tab === key
+                      ? key === 'gmb'
+                        ? 'text-[#0B7A3B]'
+                        : key === 'mtr'
+                        ? 'text-mtr'
+                        : 'text-[#e30613]'
+                      : ''
+                  }`}
                 />
                 {label}
               </button>
@@ -963,39 +1051,70 @@ export default function App() {
 
         {/* Mobile tab switch */}
         <div className="flex gap-1 px-3 pb-2 md:hidden">
-          <button
-            onClick={() => setTab('bus')}
-            className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${
-              tab === 'bus'
-                ? 'bg-stone-900 text-white shadow-sm'
-                : 'border border-stone-200 bg-white text-stone-600'
-            }`}
-          >
-            {lang === 'tc' ? '巴士' : 'Bus'}
-          </button>
-          <button
-            onClick={() => setTab('mtr')}
-            className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${
-              tab === 'mtr'
-                ? 'bg-stone-900 text-white shadow-sm'
-                : 'border border-stone-200 bg-white text-stone-600'
-            }`}
-          >
-            {lang === 'tc' ? '港鐵' : 'MTR'}
-          </button>
+          {(
+            [
+              ['bus', lang === 'tc' ? '巴士' : 'Bus', IconBus],
+              ['gmb', lang === 'tc' ? '小巴' : 'Minibus', IconMinibus],
+              ['mtr', lang === 'tc' ? '港鐵' : 'MTR', IconTrain],
+            ] as const
+          ).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+                tab === key
+                  ? 'bg-stone-900 text-white shadow-sm'
+                  : 'border border-stone-200 bg-white text-stone-600'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
         </div>
       </header>
 
       {/* ─────────── Main ─────────── */}
       <main
         className={`relative mx-auto flex w-full max-w-[1720px] flex-1 min-h-0 flex-col overflow-y-auto md:overflow-hidden ${
-          tab === 'mtr'
-            ? ''
-            : 'md:grid md:grid-cols-[320px_minmax(0,1fr)] md:grid-rows-[300px_minmax(0,1fr)] xl:grid-cols-[330px_minmax(0,1fr)_minmax(360px,31%)] xl:grid-rows-1'
+          tab === 'bus'
+            ? 'md:grid md:grid-cols-[320px_minmax(0,1fr)] md:grid-rows-[300px_minmax(0,1fr)] xl:grid-cols-[330px_minmax(0,1fr)_minmax(360px,31%)] xl:grid-rows-1'
+            : ''
         }`}
       >
         {tab === 'mtr' ? (
-          <MtrPanel lang={lang} />
+          <MtrPanel
+            lang={lang}
+            line={mtrLine}
+            station={mtrStation}
+            onSelect={(line, station) => {
+              setMtrLine(line)
+              setMtrStation(station)
+            }}
+            favMtr={favMtr}
+            isMtrFav={isMtrFav}
+            toggleMtrFav={toggleMtr}
+            removeMtrFav={removeMtr}
+            showToast={showToast}
+            onOpenFavorites={() => {
+              setTab('bus')
+              setBusMode('favorites')
+            }}
+          />
+        ) : tab === 'gmb' ? (
+          <GmbPanel
+            lang={lang}
+            favGmb={favGmb}
+            isGmbFav={isGmbFav}
+            toggleGmb={toggleGmb}
+            removeGmb={removeGmb}
+            target={gmbTarget}
+            onOpenFavorites={() => {
+              setTab('bus')
+              setBusMode('favorites')
+            }}
+            showToast={showToast}
+          />
         ) : (
           <>
             {/* ── Map rail ── */}
@@ -1315,50 +1434,23 @@ export default function App() {
                           >
                             <button
                               type="button"
-                              onClick={async () => {
-                                const v: RouteVariant = {
-                                  operator: rs.operator as 'KMB' | 'CTB',
-                                  route: rs.route,
-                                  bound: rs.bound,
-                                  service_type: rs.service_type,
-                                  dest_tc: rs.dest_tc,
-                                  dest_en: rs.dest_en,
-                                  orig_tc: rs.orig_tc,
-                                  orig_en: rs.orig_en,
-                                  label_tc: `${rs.route} → ${rs.dest_tc}`,
-                                  label_en: `${rs.route} → ${rs.dest_en}`,
-                                }
-                                let partners: RouteVariant[] = [v]
-                                try {
-                                  if (rs.partnersJson) {
-                                    partners = JSON.parse(rs.partnersJson)
-                                  }
-                                } catch {
-                                  /* ignore */
-                                }
-                                setBusMode('route')
-                                setRouteQuery(rs.route)
-                                await pickVariant(v, partners)
-                                handleSelectRouteStop({
-                                  seq: rs.seq,
-                                  stopId: rs.stopId,
-                                  name_tc: rs.stopName_tc,
-                                  name_en: rs.stopName_en,
-                                  lat: rs.stopLat,
-                                  lng: rs.stopLng,
-                                  operator: rs.operator as 'KMB' | 'CTB',
-                                })
-                                setNearestStopId(rs.stopId)
-                                window.setTimeout(() => {
-                                  nearestStopRef.current?.scrollIntoView({
-                                    behavior: 'smooth',
-                                    block: 'center',
-                                  })
-                                }, 400)
-                              }}
+                              onClick={() => openFavRouteStop(rs)}
                               className="min-w-0 flex-1 px-2.5 py-2 text-left"
                             >
                               <span className="block truncate text-[13px] font-bold">
+                                <span
+                                  className={`mr-1 inline-block rounded px-1 py-0.5 align-[1px] text-[8px] font-bold text-white ${
+                                    rs.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+                                  }`}
+                                >
+                                  {rs.operator === 'KMB'
+                                    ? lang === 'tc'
+                                      ? '九巴'
+                                      : 'KMB'
+                                    : lang === 'tc'
+                                    ? '城巴'
+                                    : 'CTB'}
+                                </span>
                                 {rs.route}{' '}
                                 <span className="font-medium text-stone-500">
                                   → {lang === 'tc' ? rs.dest_tc : rs.dest_en}
@@ -1422,9 +1514,24 @@ export default function App() {
                                   operator: s.operator as BusStop['operator'],
                                 })
                               }
-                              className="min-w-0 flex-1 truncate px-2.5 py-2 text-left text-[13px] font-medium"
+                              className="flex min-w-0 flex-1 items-center gap-1.5 truncate px-2.5 py-2 text-left text-[13px] font-medium"
                             >
-                              {lang === 'tc' ? s.name_tc : s.name_en}
+                              <span
+                                className={`flex-shrink-0 rounded px-1 py-0.5 text-[8px] font-bold text-white ${
+                                  s.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+                                }`}
+                              >
+                                {s.operator === 'KMB'
+                                  ? lang === 'tc'
+                                    ? '九巴'
+                                    : 'KMB'
+                                  : lang === 'tc'
+                                  ? '城巴'
+                                  : 'CTB'}
+                              </span>
+                              <span className="truncate">
+                                {lang === 'tc' ? s.name_tc : s.name_en}
+                              </span>
                             </button>
                             <button
                               type="button"
@@ -1458,22 +1565,7 @@ export default function App() {
                             className="flex items-center gap-1 rounded-lg border border-transparent hover:border-stone-200 hover:bg-stone-50"
                           >
                             <button
-                              onClick={() => {
-                                setBusMode('route')
-                                setRouteQuery(r.route)
-                                pickVariant({
-                                  operator: r.operator,
-                                  route: r.route,
-                                  bound: r.bound,
-                                  service_type: r.service_type,
-                                  dest_tc: r.dest_tc,
-                                  dest_en: r.dest_en,
-                                  orig_tc: r.orig_tc,
-                                  orig_en: r.orig_en,
-                                  label_tc: r.label_tc,
-                                  label_en: r.label_en,
-                                })
-                              }}
+                              onClick={() => openFavRoute(r)}
                               className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left text-[12px] font-semibold"
                             >
                               <span
@@ -1492,6 +1584,140 @@ export default function App() {
                               className="px-2 py-1.5 text-stone-300 hover:text-stone-600"
                               title={lang === 'tc' ? '移除' : 'Remove'}
                               onClick={() => removeRoute(r)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="label-cap mb-1.5">
+                      {lang === 'tc' ? '收藏小巴站' : 'Saved minibus stops'}
+                    </p>
+                    {favGmb.length === 0 ? (
+                      <p className="text-xs leading-relaxed text-stone-500">
+                        {lang === 'tc'
+                          ? '喺「小巴」分頁揀好路線方向，撳站旁 ☆ 收藏。'
+                          : 'In the Minibus tab, pick a direction and tap ☆ next to a stop.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {favGmb.map((f) => {
+                          const meta = regionMeta(f.region)
+                          return (
+                            <div
+                              key={`${f.routeId}-${f.routeSeq}-${f.stopId}`}
+                              className="flex items-center gap-1 rounded-lg border border-transparent hover:border-stone-200 hover:bg-stone-50"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTab('gmb')
+                                  setGmbTarget({
+                                    region: f.region as GmbRegion,
+                                    code: f.routeCode,
+                                    routeId: f.routeId,
+                                    routeSeq: f.routeSeq,
+                                    stopSeq: f.stopSeq,
+                                    nonce: Date.now(),
+                                  })
+                                }}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left"
+                              >
+                                <span
+                                  className="flex-shrink-0 rounded px-1 py-0.5 text-[8px] font-bold text-white"
+                                  style={{ backgroundColor: meta.color }}
+                                >
+                                  {regionLabel(f.region, lang)}
+                                </span>
+                                <span className="flex-shrink-0 rounded bg-[#0B7A3B] px-1 py-0.5 text-[8px] font-bold text-white">
+                                  {lang === 'tc' ? '小巴' : 'GMB'}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[13px] font-bold">
+                                    {f.routeCode}{' '}
+                                    <span className="font-medium text-stone-500">
+                                      · {lang === 'tc' ? f.stopName_tc : f.stopName_en}
+                                    </span>
+                                  </span>
+                                  <span className="mt-0.5 block truncate text-[11px] text-stone-500">
+                                    → {lang === 'tc' ? f.dest_tc : f.dest_en}
+                                  </span>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="px-2 py-1.5 text-stone-300 hover:text-stone-600"
+                                title={lang === 'tc' ? '移除' : 'Remove'}
+                                onClick={() =>
+                                  removeGmb({
+                                    routeId: f.routeId,
+                                    routeSeq: f.routeSeq,
+                                    stopId: f.stopId,
+                                  })
+                                }
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="label-cap mb-1.5">
+                      {lang === 'tc' ? '收藏港鐵站' : 'Saved MTR stations'}
+                    </p>
+                    {favMtr.length === 0 ? (
+                      <p className="text-xs leading-relaxed text-stone-500">
+                        {lang === 'tc'
+                          ? '喺「港鐵」分頁揀好線同站，撳 ☆ 收藏，一撳睇返上／下行班次。'
+                          : 'In the MTR tab, pick a line and station and tap ☆ to save it.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {favMtr.map((f) => (
+                          <div
+                            key={`${f.line}-${f.station}`}
+                            className="flex items-center gap-1 rounded-lg border border-transparent hover:border-stone-200 hover:bg-stone-50"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMtrLine(f.line)
+                                setMtrStation(f.station)
+                                setTab('mtr')
+                              }}
+                              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left"
+                            >
+                              <span
+                                className="flex-shrink-0 rounded px-1 py-0.5 text-[8px] font-bold text-white"
+                                style={{ backgroundColor: f.color }}
+                              >
+                                {lang === 'tc' ? '港鐵' : 'MTR'}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-bold">
+                                  {lang === 'tc' ? f.line_tc : f.line_en}{' '}
+                                  <span className="font-medium text-stone-500">
+                                    · {lang === 'tc' ? f.station_tc : f.station_en}
+                                  </span>
+                                </span>
+                                <span className="mt-0.5 block text-[11px] text-stone-500">
+                                  {lang === 'tc' ? '一撳睇上／下行實時班次' : 'Tap for live up/down trains'}
+                                </span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 py-1.5 text-stone-300 hover:text-stone-600"
+                              title={lang === 'tc' ? '移除' : 'Remove'}
+                              onClick={() => removeMtr({ line: f.line, station: f.station })}
                             >
                               ✕
                             </button>
@@ -2252,37 +2478,298 @@ export default function App() {
                       </p>
                     )}
 
-                  {busMode !== 'route' &&
-                    !selectedStop &&
-                    busMode !== 'nearby' && (
-                      <div className="flex flex-col items-center justify-center px-6 py-12 text-center md:py-16">
-                        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
-                          {busMode === 'favorites' ? (
-                            <IconStar className="h-7 w-7" />
-                          ) : (
-                            <IconSearch className="h-7 w-7" />
-                          )}
-                        </div>
-                        <h3 className="text-base font-bold tracking-tight">
-                          {busMode === 'favorites'
-                            ? lang === 'tc'
-                              ? '由收藏開始'
-                              : 'Start from a favourite'
-                            : lang === 'tc'
-                            ? '揀一個站'
-                            : 'Pick a stop'}
-                        </h3>
-                        <p className="mt-1 max-w-sm text-sm leading-relaxed text-stone-500">
-                          {busMode === 'favorites'
-                            ? lang === 'tc'
-                              ? '左邊揀收藏嘅路線站或車站，即刻睇到實時到站。'
-                              : 'Choose a saved stop on the left to see live arrivals.'
-                            : lang === 'tc'
-                            ? '喺左邊搜尋站名，再撳個站睇所有路線實時到站。'
-                            : 'Search a stop name on the left, then open it for live arrivals.'}
+                  {busMode === 'favorites' && !selectedStop && (
+                    <div className="hidden md:block">
+                      <div className="flex items-center justify-between gap-3 border-b border-stone-200/70 px-4 py-3">
+                        <p className="label-cap">
+                          {lang === 'tc' ? '收藏總覽' : 'All favourites'}
+                        </p>
+                        <p className="text-[11px] font-medium tabular-nums text-stone-500">
+                          {lang === 'tc' ? '巴士' : 'Bus'}{' '}
+                          {favStops.length +
+                            favRoutes.length +
+                            favRouteStops.length}{' '}
+                          · {lang === 'tc' ? '小巴' : 'GMB'} {favGmb.length} ·{' '}
+                          {lang === 'tc' ? '港鐵' : 'MTR'} {favMtr.length}
                         </p>
                       </div>
-                    )}
+
+                      {favStops.length +
+                        favRoutes.length +
+                        favRouteStops.length +
+                        favGmb.length +
+                        favMtr.length ===
+                      0 ? (
+                        <div className="flex flex-col items-center justify-center px-6 py-12 text-center md:py-16">
+                          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
+                            <IconStar className="h-7 w-7" />
+                          </div>
+                          <h3 className="text-base font-bold tracking-tight">
+                            {lang === 'tc' ? '由收藏開始' : 'Start from a favourite'}
+                          </h3>
+                          <p className="mt-1 max-w-sm text-sm leading-relaxed text-stone-500">
+                            {lang === 'tc'
+                              ? '喺巴士、小巴或港鐵分頁撳 ☆ 收藏，之後喺呢度一撳就睇到實時班次。'
+                              : 'Tap ☆ in the bus, minibus or MTR tab, then open it here in one tap.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-4 p-4 lg:grid-cols-2">
+                          {favMtr.length > 0 && (
+                            <section>
+                              <p className="label-cap mb-1.5">
+                                {lang === 'tc' ? '港鐵站' : 'MTR stations'}
+                              </p>
+                              <div className="space-y-1.5">
+                                {favMtr.map((f) => (
+                                  <button
+                                    key={`${f.line}-${f.station}`}
+                                    type="button"
+                                    onClick={() => {
+                                      setMtrLine(f.line)
+                                      setMtrStation(f.station)
+                                      setTab('mtr')
+                                    }}
+                                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-stone-50"
+                                  >
+                                    <span
+                                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[8px] font-black leading-none text-white"
+                                      style={{ backgroundColor: f.color }}
+                                    >
+                                      {lang === 'tc' ? '港鐵' : 'MTR'}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-[13px] font-bold">
+                                        {lang === 'tc' ? f.line_tc : f.line_en}
+                                        <span className="font-medium text-stone-500">
+                                          {' · '}
+                                          {lang === 'tc' ? f.station_tc : f.station_en}
+                                        </span>
+                                      </span>
+                                      <span className="mt-0.5 block text-[11px] text-stone-500">
+                                        {lang === 'tc'
+                                          ? '上／下行實時班次'
+                                          : 'Live up / down trains'}
+                                      </span>
+                                    </span>
+                                    <IconChevron className="h-4 w-4 flex-shrink-0 text-stone-300" />
+                                  </button>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+
+                          {favGmb.length > 0 && (
+                            <section>
+                              <p className="label-cap mb-1.5">
+                                {lang === 'tc' ? '小巴站' : 'Minibus stops'}
+                              </p>
+                              <div className="space-y-1.5">
+                                {favGmb.map((f) => {
+                                  const meta = regionMeta(f.region)
+                                  return (
+                                    <button
+                                      key={`${f.routeId}-${f.routeSeq}-${f.stopId}`}
+                                      type="button"
+                                      onClick={() => {
+                                        setTab('gmb')
+                                        setGmbTarget({
+                                          region: f.region as GmbRegion,
+                                          code: f.routeCode,
+                                          routeId: f.routeId,
+                                          routeSeq: f.routeSeq,
+                                          stopSeq: f.stopSeq,
+                                          nonce: Date.now(),
+                                        })
+                                      }}
+                                      className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-stone-50"
+                                    >
+                                      <span
+                                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[8px] font-black leading-none text-white"
+                                        style={{ backgroundColor: meta.color }}
+                                      >
+                                        {lang === 'tc' ? '小巴' : 'GMB'}
+                                      </span>
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[13px] font-bold">
+                                          {f.routeCode}
+                                          <span className="font-medium text-stone-500">
+                                            {' · '}
+                                            {lang === 'tc' ? f.stopName_tc : f.stopName_en}
+                                          </span>
+                                        </span>
+                                        <span className="mt-0.5 block truncate text-[11px] text-stone-500">
+                                          {regionLabel(f.region, lang)} ·{' '}
+                                          {lang === 'tc' ? '往' : 'to'}{' '}
+                                          {lang === 'tc' ? f.dest_tc : f.dest_en}
+                                        </span>
+                                      </span>
+                                      <IconChevron className="h-4 w-4 flex-shrink-0 text-stone-300" />
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </section>
+                          )}
+
+                          {(favRouteStops.length > 0 ||
+                            favStops.length > 0 ||
+                            favRoutes.length > 0) && (
+                            <section>
+                              <p className="label-cap mb-1.5">
+                                {lang === 'tc' ? '巴士' : 'Bus'}
+                              </p>
+                              <div className="space-y-1.5">
+                                {favRouteStops.map((rs) => (
+                                  <button
+                                    key={`${rs.operator}-${rs.route}-${rs.bound}-${rs.service_type}-${rs.stopId}`}
+                                    type="button"
+                                    onClick={() => openFavRouteStop(rs)}
+                                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-stone-50"
+                                  >
+                                    <span
+                                      className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[8px] font-black leading-none text-white ${
+                                        rs.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+                                      }`}
+                                    >
+                                      {rs.operator === 'KMB'
+                                        ? lang === 'tc'
+                                          ? '九巴'
+                                          : 'KMB'
+                                        : lang === 'tc'
+                                        ? '城巴'
+                                        : 'CTB'}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-[13px] font-bold">
+                                        {rs.route}
+                                        <span className="font-medium text-stone-500">
+                                          {' · '}
+                                          {lang === 'tc' ? rs.stopName_tc : rs.stopName_en}
+                                        </span>
+                                      </span>
+                                      <span className="mt-0.5 block truncate text-[11px] text-stone-500">
+                                        {lang === 'tc' ? '往' : 'to'}{' '}
+                                        {lang === 'tc' ? rs.dest_tc : rs.dest_en}
+                                      </span>
+                                    </span>
+                                    <IconChevron className="h-4 w-4 flex-shrink-0 text-stone-300" />
+                                  </button>
+                                ))}
+                                {favStops.map((st) => (
+                                  <button
+                                    key={`${st.operator}-${st.id}`}
+                                    type="button"
+                                    onClick={() =>
+                                      handleSelectStop({
+                                        id: st.id,
+                                        name_tc: st.name_tc,
+                                        name_en: st.name_en,
+                                        lat: st.lat,
+                                        lng: st.lng,
+                                        operator: st.operator as BusStop['operator'],
+                                      })
+                                    }
+                                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-stone-50"
+                                  >
+                                    <span
+                                      className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[8px] font-black leading-none text-white ${
+                                        st.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+                                      }`}
+                                    >
+                                      {st.operator === 'KMB'
+                                        ? lang === 'tc'
+                                          ? '九巴'
+                                          : 'KMB'
+                                        : lang === 'tc'
+                                        ? '城巴'
+                                        : 'CTB'}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-[13px] font-bold">
+                                        {lang === 'tc' ? st.name_tc : st.name_en}
+                                      </span>
+                                      <span className="mt-0.5 block text-[11px] text-stone-500">
+                                        {lang === 'tc'
+                                          ? '此站所有路線實時到站'
+                                          : 'All routes at this stop'}
+                                      </span>
+                                    </span>
+                                    <IconChevron className="h-4 w-4 flex-shrink-0 text-stone-300" />
+                                  </button>
+                                ))}
+                                {favRoutes.map((r) => (
+                                  <button
+                                    key={`${r.operator}-${r.route}-${r.bound}-${r.service_type}`}
+                                    type="button"
+                                    onClick={() => openFavRoute(r)}
+                                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-stone-50"
+                                  >
+                                    <span
+                                      className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[8px] font-black leading-none text-white ${
+                                        r.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+                                      }`}
+                                    >
+                                      {r.operator === 'KMB'
+                                        ? lang === 'tc'
+                                          ? '九巴'
+                                          : 'KMB'
+                                        : lang === 'tc'
+                                        ? '城巴'
+                                        : 'CTB'}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-[13px] font-bold">
+                                        {lang === 'tc' ? r.label_tc : r.label_en}
+                                      </span>
+                                      <span className="mt-0.5 block text-[11px] text-stone-500">
+                                        {lang === 'tc'
+                                          ? '全線各站實時到站'
+                                          : 'Every stop on the route'}
+                                      </span>
+                                    </span>
+                                    <IconChevron className="h-4 w-4 flex-shrink-0 text-stone-300" />
+                                  </button>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {busMode === 'favorites' && !selectedStop && (
+                    <div className="flex flex-col items-center justify-center px-6 py-10 text-center md:hidden">
+                      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
+                        <IconStar className="h-6 w-6" />
+                      </div>
+                      <h3 className="text-sm font-bold tracking-tight">
+                        {lang === 'tc' ? '由收藏開始' : 'Start from a favourite'}
+                      </h3>
+                      <p className="mt-1 max-w-xs text-xs leading-relaxed text-stone-500">
+                        {lang === 'tc'
+                          ? '上面揀一個收藏，即刻睇實時到站。'
+                          : 'Pick a favourite above to see live arrivals.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {busMode === 'search' && !selectedStop && (
+                    <div className="flex flex-col items-center justify-center px-6 py-12 text-center md:py-16">
+                      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
+                        <IconSearch className="h-7 w-7" />
+                      </div>
+                      <h3 className="text-base font-bold tracking-tight">
+                        {lang === 'tc' ? '揀一個站' : 'Pick a stop'}
+                      </h3>
+                      <p className="mt-1 max-w-sm text-sm leading-relaxed text-stone-500">
+                        {lang === 'tc'
+                          ? '喺左邊搜尋站名，再撳個站睇所有路線實時到站。'
+                          : 'Search a stop name on the left, then open it for live arrivals.'}
+                      </p>
+                    </div>
+                  )}
 
                   {busMode === 'route' &&
                     showAllAtStop &&
@@ -2307,7 +2794,7 @@ export default function App() {
       )}
 
       <footer className="flex-shrink-0 border-t border-stone-200/70 bg-white/60 px-4 py-1.5 text-center text-[10px] text-stone-500 backdrop-blur">
-        Data: data.gov.hk · KMB · Citybus · MTR · Not affiliated
+        Data: data.gov.hk · KMB · Citybus · GMB · MTR · Not affiliated
       </footer>
     </div>
   )
