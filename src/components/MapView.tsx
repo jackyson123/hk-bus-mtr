@@ -1,27 +1,37 @@
 import { useEffect, useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet'
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMap,
+  Polyline,
+  ZoomControl,
+} from 'react-leaflet'
 import L from 'leaflet'
 import type { BusStop, NearbyStop } from '../types'
 import type { Lang } from '../types'
 
 const userIcon = L.divIcon({
   className: '',
-  html: `<div style="width:16px;height:16px;background:#3b82f6;border:3px solid white;border-radius:50%;box-shadow:0 0 8px rgba(59,130,246,0.8)"></div>`,
-  iconSize: [16, 16],
-  iconAnchor: [8, 8],
+  html: `<div style="position:relative;width:18px;height:18px"><span style="position:absolute;inset:-6px;border-radius:50%;background:rgba(59,130,246,0.22)"></span><span style="position:absolute;inset:0;background:#3b82f6;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 6px rgba(37,99,235,0.55)"></span></div>`,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
 })
 
 const stopIcon = (op: string, selected?: boolean, seq?: number) => {
-  const size = selected ? 22 : seq != null ? 20 : 14
-  const bg = op === 'KMB' ? '#E30613' : op === 'CTB' ? '#0066B3' : '#9D2D2D'
-  const border = selected ? '#34d399' : 'white'
+  const size = selected ? 24 : seq != null ? 21 : 15
+  const bg = op === 'KMB' ? '#e30613' : op === 'CTB' ? '#0066b3' : '#9d2d2d'
+  const ring = selected
+    ? '0 0 0 3px rgba(16,185,129,0.35),0 1px 4px rgba(0,0,0,0.4)'
+    : '0 1px 4px rgba(0,0,0,0.35)'
   const label =
     seq != null
-      ? `<span style="color:white;font-size:10px;font-weight:700;line-height:${size}px">${seq}</span>`
+      ? `<span style="color:#fff;font-size:${size >= 21 ? 10 : 9}px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">${seq}</span>`
       : ''
   return L.divIcon({
     className: '',
-    html: `<div style="width:${size}px;height:${size}px;background:${bg};border:2px solid ${border};border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center">${label}</div>`,
+    html: `<div style="width:${size}px;height:${size}px;background:${bg};border:2px solid ${selected ? '#34d399' : '#fff'};border-radius:50%;box-shadow:${ring};display:flex;align-items:center;justify-content:center">${label}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   })
@@ -117,18 +127,20 @@ export default function MapView({
   }, [showRouteLine, visibleStops])
 
   return (
-    <div style={{ height, width: '100%' }} className="rounded-xl overflow-hidden">
+    <div style={{ height, width: '100%' }} className="overflow-hidden">
       <MapContainer
         center={center}
         zoom={15}
         style={{ height: '100%', width: '100%' }}
-        zoomControl={true}
+        zoomControl={false}
         attributionControl={false}
+        className="hk-map"
       >
         <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
+        <ZoomControl position="bottomleft" />
 
         {fitToStops && stops.length > 0 && (
           <FitToStops stops={stops} fitKey={fitKey || String(stops.length)} />
@@ -150,14 +162,25 @@ export default function MapView({
         )}
 
         {linePositions.length > 1 && (
-          <Polyline
-            positions={linePositions}
-            pathOptions={{
-              color: '#f87171',
-              weight: 3,
-              opacity: 0.7,
-            }}
-          />
+          <>
+            <Polyline
+              positions={linePositions}
+              pathOptions={{
+                color: '#ffffff',
+                weight: 8,
+                opacity: 0.9,
+              }}
+            />
+            <Polyline
+              positions={linePositions}
+              pathOptions={{
+                color: '#e30613',
+                weight: 4,
+                opacity: 0.9,
+                lineJoin: 'round',
+              }}
+            />
+          </>
         )}
 
         {visibleStops.map((s, idx) => (
@@ -178,14 +201,14 @@ export default function MapView({
                 <div className="font-semibold">
                   {lang === 'tc' ? s.name_tc : s.name_en}
                 </div>
-                <div className="text-xs opacity-70 mt-0.5">
+                <div className="mt-0.5 text-xs opacity-70">
                   {s.operator} · {s.id}
                   {'distance' in s && s.distance != null
                     ? ` · ${Math.round(s.distance)}m`
                     : ''}
                 </div>
                 {selectedStopId === s.id && (
-                  <div className="text-xs text-emerald-800 mt-1">
+                  <div className="mt-1 text-xs text-emerald-800">
                     {lang === 'tc' ? '已選取' : 'Selected'}
                   </div>
                 )}

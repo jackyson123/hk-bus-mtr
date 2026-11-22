@@ -23,9 +23,12 @@ export default function EtaList({
 }: Props) {
   if (loading) {
     return (
-      <div className="space-y-2 p-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-14 bg-stone-50 rounded-xl animate-pulse" />
+      <div className="grid gap-2.5 p-3 md:grid-cols-2 md:p-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className="h-[7.5rem] animate-pulse rounded-2xl border border-stone-100 bg-stone-50"
+          />
         ))}
       </div>
     )
@@ -33,8 +36,15 @@ export default function EtaList({
 
   if (!etas.length) {
     return (
-      <div className="p-6 text-center text-stone-500 text-sm">
-        {lang === 'tc' ? '暫時沒有到站資料' : 'No arrival data'}
+      <div className="px-6 py-10 text-center">
+        <p className="text-sm font-semibold text-stone-700">
+          {lang === 'tc' ? '暫時沒有到站資料' : 'No arrival data'}
+        </p>
+        <p className="mt-1 text-xs text-stone-500">
+          {lang === 'tc'
+            ? '資料每 30 秒自動更新，請稍等或撳「更新」。'
+            : 'Updates every 30 seconds — wait a moment or tap Refresh.'}
+        </p>
       </div>
     )
   }
@@ -46,89 +56,99 @@ export default function EtaList({
     return acc
   }, {})
 
+  const cards = Object.entries(grouped).map(([key, items]) => {
+    const first = items[0]
+    return { key, first, sorted: sortEtasByTime(items).slice(0, 3) }
+  })
+
+  // Soonest first, like a departure board
+  cards.sort((a, b) => {
+    const ta = a.sorted[0]?.eta ? new Date(a.sorted[0].eta!).getTime() : Infinity
+    const tb = b.sorted[0]?.eta ? new Date(b.sorted[0].eta!).getTime() : Infinity
+    return ta - tb
+  })
+
   return (
-    <div className="space-y-2 p-2">
-      {Object.entries(grouped).map(([key, items]) => {
-        const first = items[0]
-        const sorted = sortEtasByTime(items).slice(0, 3)
-        return (
-          <div
-            key={key}
-            className="bg-white rounded-xl p-3 border border-stone-200"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <span
-                className={`text-xs font-bold px-2 py-0.5 rounded ${
-                  first.operator === 'KMB'
-                    ? 'bg-kmb text-white'
-                    : 'bg-ctb text-white'
-                }`}
-              >
-                {first.operator}
-              </span>
-              <span className="font-bold text-lg tracking-wide">{first.route}</span>
-              <span className="text-stone-700 text-sm truncate">
-                → {lang === 'tc' ? first.dest_tc : first.dest_en}
-              </span>
+    <div className="grid gap-2.5 p-3 md:grid-cols-2 md:gap-3 md:p-4">
+      {cards.map(({ key, first, sorted }) => (
+        <div
+          key={key}
+          className="fade-up rounded-2xl border border-stone-200/80 bg-white p-3.5 transition hover:border-stone-300 hover:shadow-sm"
+        >
+          <div className="flex items-start gap-2">
+            <span
+              className={`mt-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold text-white ${
+                first.operator === 'KMB' ? 'bg-kmb' : 'bg-ctb'
+              }`}
+            >
+              {first.operator}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className="text-lg font-black leading-none tracking-tight">
+                  {first.route}
+                </span>
+                <span className="truncate text-xs font-medium text-stone-600">
+                  → {lang === 'tc' ? first.dest_tc : first.dest_en}
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              {sorted.map((e, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between gap-2 flex-wrap"
-                >
-                  <div
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium tabular-nums ${
-                      i === 0
-                        ? 'bg-emerald-100 text-emerald-900 border border-emerald-600 font-bold'
-                        : 'bg-stone-100 text-stone-900 border border-stone-300 font-semibold'
-                    }`}
-                  >
-                    {formatEta(e.eta, lang)}
-                    {e.rmk_tc || e.rmk_en ? (
-                      <span className="ml-1 text-xs text-stone-600">
-                        ({lang === 'tc' ? e.rmk_tc : e.rmk_en})
-                      </span>
-                    ) : null}
-                  </div>
-                  {onRemind && e.eta && (
-                    <div className="flex gap-1">
-                      {[3, 5, 10].map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() =>
-                            onRemind({
-                              route: e.route,
-                              dest: lang === 'tc' ? e.dest_tc : e.dest_en,
-                              etaIso: e.eta!,
-                              minutesBefore: m,
-                            })
-                          }
-                          className="text-[9px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 hover:bg-stone-200"
-                          title={
-                            lang === 'tc'
-                              ? `到站前 ${m} 分鐘提醒`
-                              : `Remind ${m} min before`
-                          }
-                        >
-                          🔔{m}
-                          {lang === 'tc' ? '分' : 'm'}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {stopName && onRemind && (
-              <p className="text-[10px] text-stone-600 mt-2">
-                {lang === 'tc' ? '🔔 = 到站前提醒' : '🔔 = reminder'}
-              </p>
-            )}
           </div>
-        )
-      })}
+
+          <div className="mt-2.5 space-y-1.5">
+            {sorted.map((e, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className={`w-[5.2rem] flex-shrink-0 rounded-lg px-2 py-1 text-center text-[13px] font-bold tabular-nums ${
+                    i === 0
+                      ? 'bg-emerald-100 text-emerald-900'
+                      : 'bg-stone-100 text-stone-700'
+                  }`}
+                >
+                  {formatEta(e.eta, lang)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-stone-500">
+                  {lang === 'tc' ? e.rmk_tc : e.rmk_en}
+                </span>
+                {onRemind && e.eta && (
+                  <span className="flex flex-shrink-0 gap-1">
+                    {[3, 5, 10].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() =>
+                          onRemind({
+                            route: e.route,
+                            dest:
+                              lang === 'tc' ? e.dest_tc : e.dest_en,
+                            etaIso: e.eta!,
+                            minutesBefore: m,
+                          })
+                        }
+                        className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[9px] font-semibold text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900"
+                        title={
+                          lang === 'tc'
+                            ? `到站前 ${m} 分鐘提醒`
+                            : `Remind ${m} min before`
+                        }
+                      >
+                        🔔{m}
+                        {lang === 'tc' ? '分' : 'm'}
+                      </button>
+                    ))}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {stopName && onRemind && (
+            <p className="mt-2 text-[10px] text-stone-400">
+              {lang === 'tc' ? '🔔 = 到站前提醒' : '🔔 = reminder'}
+            </p>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

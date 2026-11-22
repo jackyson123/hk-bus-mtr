@@ -4,10 +4,23 @@ const KMB_BASE = 'https://data.etabus.gov.hk/v1/transport/kmb'
 const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus'
 const MTR_BASE = 'https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php'
 
+/** GET JSON with a couple of automatic retries — open-data endpoints
+ *  (esp. data.etabus.gov.hk) intermittently drop requests / CORS headers. */
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
-  return res.json()
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
+      return (await res.json()) as T
+    } catch (e) {
+      lastErr = e
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)))
+      }
+    }
+  }
+  throw lastErr
 }
 
 // ---------- KMB ----------
