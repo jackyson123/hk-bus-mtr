@@ -22,6 +22,7 @@ import {
 import { useGeolocation } from './hooks/useGeolocation'
 import type { FavRoute, FavRouteStop } from './lib/favorites'
 import { regionMeta, regionLabel } from './lib/gmb'
+import { getBusPath, type LatLng } from './lib/shapes'
 import type { GmbRegion } from './lib/gmb'
 import { useFavorites } from './hooks/useFavorites'
 import { useReminders } from './hooks/useReminders'
@@ -93,6 +94,8 @@ export default function App() {
   const [activePartners, setActivePartners] = useState<RouteVariant[]>([])
   const [selectedVariant, setSelectedVariant] = useState<RouteVariant | null>(null)
   const [routeStops, setRouteStops] = useState<RouteStopItem[]>([])
+  /** 真實行車軌跡（運輸署路線幾何），冇資料時 null → 降級用站點連線 */
+  const [routePath, setRoutePath] = useState<LatLng[] | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
   const [stopsLoadingRoute, setStopsLoadingRoute] = useState(false)
   const [routeError, setRouteError] = useState<string | null>(null)
@@ -303,6 +306,33 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busMode, nearby, nearbyReloadKey])
+
+  // 路線模式：載入真實行車軌跡（貼住馬路），失敗就保持站點連線
+  useEffect(() => {
+    setRoutePath(null)
+    if (busMode !== 'route' || !selectedVariant || routeStops.length < 2) return
+    const v = selectedVariant
+    const first = routeStops[0]
+    const last = routeStops[routeStops.length - 1]
+    let cancelled = false
+    getBusPath(
+      v.operator,
+      v.route,
+      [first.lat, first.lng],
+      [last.lat, last.lng],
+      v.bound,
+      v.service_type
+    )
+      .then((p) => {
+        if (!cancelled) setRoutePath(p)
+      })
+      .catch(() => {
+        /* 冇軌跡就用站點連線 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [busMode, selectedVariant, routeStops])
 
   // 路線模式：定時自動更新各站到站（唔使手動）
   useEffect(() => {
@@ -1178,12 +1208,13 @@ export default function App() {
                   }
                   fitKey={
                     busMode === 'route' && selectedVariant
-                      ? `${selectedVariant.operator}-${selectedVariant.route}-${selectedVariant.bound}-${selectedVariant.service_type}-${routeStops.length}`
+                      ? `${selectedVariant.operator}-${selectedVariant.route}-${selectedVariant.bound}-${selectedVariant.service_type}-${routeStops.length}${routePath ? '-shape' : ''}`
                       : busMode === 'search'
                       ? `search-${stopNameQuery}-${stopNameResults.length}`
                       : ''
                   }
                   showRouteLine={busMode === 'route' && routeStops.length > 1}
+                  paths={busMode === 'route' && routePath ? [routePath] : null}
                 />
               </div>
             </div>

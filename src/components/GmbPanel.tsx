@@ -26,6 +26,7 @@ import {
   type GmbEtaItem,
 } from '../lib/gmb'
 import { formatEta } from '../lib/api'
+import { getGmbPath, type LatLng } from '../lib/shapes'
 import type { BusStop, Lang } from '../types'
 import type { FavGmb } from '../lib/favorites'
 
@@ -79,6 +80,8 @@ export default function GmbPanel({
   const [directions, setDirections] = useState<GmbDirection[]>([])
   const [direction, setDirection] = useState<GmbDirection | null>(null)
   const [stops, setStops] = useState<GmbRouteStop[]>([])
+  /** 真實小巴行車軌跡（運輸署 GMB 路線幾何） */
+  const [gmbPath, setGmbPath] = useState<LatLng[] | null>(null)
   const [stopsLoading, setStopsLoading] = useState(false)
   const [fare, setFare] = useState<number | null>(null)
   const [etaBySeq, setEtaBySeq] = useState<Record<number, GmbEtaItem[]>>({})
@@ -305,6 +308,29 @@ export default function GmbPanel({
         })),
     [stops]
   )
+
+  // 真實小巴走線：載入後貼住馬路畫，冇資料就保持站點連線
+  useEffect(() => {
+    setGmbPath(null)
+    if (!variant || !direction || stops.length < 2) return
+    const first = stops[0]
+    const last = stops[stops.length - 1]
+    let cancelled = false
+    getGmbPath(
+      variant.code,
+      [first.lat, first.lng],
+      [last.lat, last.lng]
+    )
+      .then((p) => {
+        if (!cancelled) setGmbPath(p)
+      })
+      .catch(() => {
+        /* 降級用站點連線 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [variant, direction, stops])
 
   const region = activeRef ? regionMeta(activeRef.region) : null
   const headway = direction ? todayHeadway(direction) : null
@@ -1059,9 +1085,10 @@ export default function GmbPanel({
                 lang={lang}
                 height="100%"
                 fitToStops={true}
-                fitKey={`gmb-${routeId}-${routeSeq}-${stops.length}`}
+                fitKey={`gmb-${routeId}-${routeSeq}-${stops.length}${gmbPath ? '-shape' : ''}`}
                 showRouteLine={mapStops.length > 1}
                 routeColor="#0B7A3B"
+                paths={gmbPath ? [gmbPath] : null}
               />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs text-stone-500">

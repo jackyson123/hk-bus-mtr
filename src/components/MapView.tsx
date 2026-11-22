@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { Fragment, useEffect, useMemo, useRef } from 'react'
 import {
   MapContainer,
   TileLayer,
@@ -11,6 +11,7 @@ import {
 import L from 'leaflet'
 import type { BusStop, NearbyStop } from '../types'
 import type { Lang } from '../types'
+import type { LatLng } from '../lib/shapes'
 
 const userIcon = L.divIcon({
   className: '',
@@ -73,31 +74,71 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
   return null
 }
 
-/** Fit map to all stop positions when route/stops change */
+/** Fit map to the stops (and the real shape once it arrives); re-fit when the map is resized (phone: map opened) */
 function FitToStops({
   stops,
   fitKey,
+  extra,
 }: {
   stops: { lat: number; lng: number }[]
   fitKey: string
+  extra?: LatLng[] | null
 }) {
   const map = useMap()
-  useEffect(() => {
-    const pts = stops.filter(
+  const data = useRef({ stops, extra })
+  data.current = { stops, extra }
+  // 軌跡一換（例如轉線）就要再 fit 一次，即使 -track 字尾冇變
+  const pathSig =
+    extra && extra.length > 1
+      ? `${extra.length}:${extra[0][0].toFixed(4)}:${extra[0][1].toFixed(4)}`
+      : '0'
+
+  const fit = () => {
+    const { stops: ss, extra: ex } = data.current
+    const pts = ss.filter(
       (s) =>
         Number.isFinite(s.lat) &&
         Number.isFinite(s.lng) &&
         s.lat !== 0 &&
         s.lng !== 0
     )
-    if (pts.length === 0) return
-    if (pts.length === 1) {
-      map.setView([pts[0].lat, pts[0].lng], 16, { animate: true })
+    const all: [number, number][] = pts.map((p) => [p.lat, p.lng])
+    if (ex && ex.length > 1) {
+      // 真實軌跡用抽樣點，避免過千點都入 bounds 計數
+      const step = Math.max(1, Math.floor(ex.length / 200))
+      for (let i = 0; i < ex.length; i += step) all.push([ex[i][0], ex[i][1]])
+      all.push([ex[ex.length - 1][0], ex[ex.length - 1][1]])
+    }
+    const size = map.getSize()
+    if (all.length === 0 || size.x < 40 || size.y < 40) return
+    if (all.length === 1) {
+      map.setView(all[0], 16)
       return
     }
-    const bounds = L.latLngBounds(pts.map((p) => [p.lat, p.lng] as [number, number]))
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16, animate: true })
-  }, [fitKey, map]) // eslint-disable-line react-hooks/exhaustive-deps
+    const bounds = L.latLngBounds(all)
+    map.fitBounds(bounds, { padding: [22, 22], maxZoom: 16, animate: false })
+  }
+
+  useEffect(() => {
+    fit()
+  }, [fitKey, pathSig, map]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const el = map.getContainer()
+    let t: number | undefined
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            window.clearTimeout(t)
+            t = window.setTimeout(fit, 220)
+          })
+        : null
+    ro?.observe(el)
+    return () => {
+      ro?.disconnect()
+      window.clearTimeout(t)
+    }
+  }, [map]) // eslint-disable-line react-hooks/exhaustive-deps
   return null
 }
 
@@ -117,6 +158,8 @@ interface Props {
   showRouteLine?: boolean
   /** Optional line colour for the connecting polyline (defaults to KMB red) */
   routeColor?: string
+  /** Real road/rail geometry (one array per path/branch). Falls back to a stop-to-stop line when empty. */
+  paths?: LatLng[][] | null
 }
 
 export default function MapView({
@@ -131,6 +174,7 @@ export default function MapView({
   fitKey = '',
   showRouteLine = false,
   routeColor = '#e30613',
+  paths = null,
 }: Props) {
   const center = useMemo(() => {
     if (fitToStops && stops.length) {
@@ -150,18 +194,23 @@ export default function MapView({
   // Show more markers for route view
   const visibleStops = fitToStops ? stops : stops.slice(0, 50)
 
-  const linePositions = useMemo(() => {
-    if (!showRouteLine) return [] as [number, number][]
-    return visibleStops
+  /** 有真實軌跡就用佢；冇（未載入／冇資料）就降級用站點連線 */
+  const linePaths = useMemo<[number, number][][]>(() => {
+    const real = (paths || []).filter((p) => p && p.length > 1)
+    if (real.length) return real as [number, number][][]
+    if (!showRouteLine) return []
+    const fallback: [number, number][] = visibleStops
       .filter((s) => s.lat && s.lng)
       .map((s) => [s.lat, s.lng] as [number, number])
-  }, [showRouteLine, visibleStops])
+    return fallback.length > 1 ? [fallback] : []
+  }, [paths, showRouteLine, visibleStops])
 
   return (
     <div style={{ height, width: '100%' }} className="overflow-hidden">
       <MapContainer
         center={center}
         zoom={15}
+        zoomSnap={0.25}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
         attributionControl={false}
@@ -175,7 +224,11 @@ export default function MapView({
         <AutoResize />
 
         {fitToStops && stops.length > 0 && (
-          <FitToStops stops={stops} fitKey={fitKey || String(stops.length)} />
+          <FitToStops
+            stops={stops}
+            fitKey={fitKey || String(stops.length)}
+            extra={linePaths.length ? linePaths[0] : null}
+          />
         )}
 
         {!fitToStops && userLat && userLng && (
@@ -193,10 +246,10 @@ export default function MapView({
           </Marker>
         )}
 
-        {linePositions.length > 1 && (
-          <>
+        {linePaths.map((path, i) => (
+          <Fragment key={`path-${i}`}>
             <Polyline
-              positions={linePositions}
+              positions={path}
               pathOptions={{
                 color: '#ffffff',
                 weight: 8,
@@ -204,16 +257,17 @@ export default function MapView({
               }}
             />
             <Polyline
-              positions={linePositions}
+              positions={path}
               pathOptions={{
                 color: routeColor,
                 weight: 4,
                 opacity: 0.9,
                 lineJoin: 'round',
+                lineCap: 'round',
               }}
             />
-          </>
-        )}
+          </Fragment>
+        ))}
 
         {visibleStops.map((s, idx) => (
           <Marker

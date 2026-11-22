@@ -17,11 +17,14 @@
 | 功能 | 說明 |
 |------|------|
 | 附近站點 | 用瀏覽器定位找 800m 內九巴站 |
-| 地圖 | Leaflet + CartoDB Dark，手機可隱藏 |
+| 地圖 | Leaflet + OpenStreetMap，手機可隱藏 |
+| 真實路線軌跡 | 巴士／小巴貼住馬路、港鐵貼住路軌（連過海隧道）畫線；缺資料時自動降級做站點連線 |
 | 到站時間 | 自動每 30 秒更新 |
 | 港鐵 | 10 條主要路線 + 常用車站 |
 | 城巴 | 支援手動輸入 Stop ID + 路線查詢 |
 | 響應式 | 手機 / 平板 / 桌面都好用 |
+
+路線軌跡資料存喺 `public/route-shapes/`，來源同重新產生方法見 [`scripts/route-shapes/README.md`](scripts/route-shapes/README.md)。
 
 ## 技術棧
 

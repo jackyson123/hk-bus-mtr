@@ -6,6 +6,7 @@ import {
   STATION_COORDS,
 } from '../lib/mtrData'
 import { getMtrSchedule } from '../lib/api'
+import { getMtrShapes, type LatLng } from '../lib/shapes'
 import MapView from './MapView'
 import { IconMap, IconRefresh, IconTrain, IconStar, IconChevron } from './Icons'
 import type { Lang, MtrSchedule, BusStop } from '../types'
@@ -68,6 +69,8 @@ export default function MtrPanel({
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [mapOpen, setMapOpen] = useState(false)
+  /** 真實路軌走線（OSM），冇資料就保持站點連線 */
+  const [trackPaths, setTrackPaths] = useState<LatLng[][] | null>(null)
 
   const stations = MTR_STATIONS[line] || []
   const currentLine = MTR_LINES.find((l) => l.code === line)
@@ -198,6 +201,22 @@ export default function MtrPanel({
         }),
     [stations]
   )
+
+  // 真實路軌：一次過載入全港十條線，揀線時直接取用
+  useEffect(() => {
+    let cancelled = false
+    setTrackPaths(null)
+    getMtrShapes()
+      .then((all) => {
+        if (!cancelled) setTrackPaths(all && all[line] ? all[line] : null)
+      })
+      .catch(() => {
+        /* 降級用站點連線 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [line])
 
   const isCurrentFav = isMtrFav({ line, station })
 
@@ -750,9 +769,10 @@ export default function MtrPanel({
               lang={lang}
               height="100%"
               fitToStops={true}
-              fitKey={`mtr-${line}-${station}`}
+              fitKey={`mtr-${line}-${station}${trackPaths ? '-track' : ''}`}
               showRouteLine={lineStops.length > 1}
               routeColor={lineColor}
+              paths={trackPaths}
             />
           )}
         </div>
