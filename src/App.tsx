@@ -427,7 +427,7 @@ export default function App() {
       window.setTimeout(() => {
         document
           .getElementById(`route-stop-${seq}`)
-          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       }, delay)
     })
   }
@@ -700,7 +700,7 @@ export default function App() {
         window.setTimeout(() => {
           nearestStopRef.current?.scrollIntoView({
             behavior: 'smooth',
-            block: 'center',
+            block: 'nearest',
           })
         }, 350)
       }
@@ -1070,8 +1070,8 @@ export default function App() {
             </div>
 
             {/* ── Left rail ── */}
-            <aside className="order-2 flex min-h-0 flex-col md:order-none md:col-start-1 md:row-start-2 md:overflow-y-auto md:border-r md:border-stone-200/70 md:px-4 md:py-4 md:pr-2 xl:row-start-1">
-              <nav className="sticky top-[56px] z-20 grid grid-cols-4 gap-1.5 border-b border-stone-200/70 bg-[#f5f4f2]/95 px-3 py-2.5 backdrop-blur md:static md:mb-3 md:grid-cols-1 md:gap-1 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+            <aside className="order-2 flex min-h-0 flex-none flex-col md:order-none md:col-start-1 md:row-start-2 md:overflow-y-auto md:border-r md:border-stone-200/70 md:px-4 md:py-4 md:pr-2 xl:row-start-1">
+              <nav className="sticky top-0 z-20 grid grid-cols-4 gap-1.5 border-b border-stone-200/70 bg-[#f5f4f2]/95 px-3 py-2.5 backdrop-blur md:static md:mb-3 md:grid-cols-1 md:gap-1 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
                 {modeItems.map(({ mode, label, Icon }) => {
                   const active = busMode === mode
                   return (
@@ -1140,7 +1140,7 @@ export default function App() {
                       <p className="label-cap mb-1.5 mt-3">
                         {lang === 'tc' ? '揀方向' : 'Direction'}
                       </p>
-                      <div className="space-y-1.5 md:max-h-[44vh] md:overflow-y-auto md:pr-1">
+                      <div className="max-h-[44vh] space-y-1.5 overflow-y-auto pr-1 md:max-h-[44vh]">
                         {directionGroups.map((g) => {
                           const active =
                             !!selectedVariant &&
@@ -1234,7 +1234,7 @@ export default function App() {
                       {lang === 'tc' ? '載入站名資料中…' : 'Loading stop names…'}
                     </p>
                   )}
-                  <div className="mt-2 space-y-1 md:max-h-[46vh] md:overflow-y-auto md:pr-1">
+                  <div className="mt-2 max-h-[46vh] space-y-1 overflow-y-auto pr-1 md:max-h-[46vh]">
                     {stopNameQuery.trim() &&
                       stopNameResults.length === 0 &&
                       !stopsLoading && (
@@ -1583,7 +1583,7 @@ export default function App() {
             </aside>
 
             {/* ── Board ── */}
-            <section className="order-3 flex min-h-0 flex-col md:order-none md:col-start-2 md:row-start-2 md:px-2 md:py-4 xl:col-start-2 xl:row-start-1 xl:pl-2 xl:pr-0">
+            <section className="order-3 flex min-h-0 flex-none flex-col md:order-none md:col-start-2 md:row-start-2 md:px-2 md:py-4 xl:col-start-2 xl:row-start-1 xl:pl-2 xl:pr-0">
               <div className="flex min-h-0 flex-col md:flex-1 md:overflow-hidden md:rounded-2xl md:border md:border-stone-200/80 md:bg-white md:shadow-card">
                 {/* Board header (desktop) */}
                 <div className="hidden items-center justify-between gap-3 border-b border-stone-200/70 px-4 py-3 md:flex">
