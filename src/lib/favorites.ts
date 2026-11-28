@@ -6,6 +6,7 @@ const ROUTES_KEY = 'hk-bus-mtr-fav-routes'
 const ROUTE_STOPS_KEY = 'hk-bus-mtr-fav-route-stops'
 const GMB_KEY = 'hk-bus-mtr-fav-gmb'
 const MTR_KEY = 'hk-bus-mtr-fav-mtr'
+const LR_KEY = 'hk-bus-mtr-fav-lr'
 
 export interface FavStop {
   id: string
@@ -202,4 +203,33 @@ export function saveFavMtr(list: FavMtr[]) {
 
 export function favKeyMtr(v: { line: string; station: string }) {
   return `${v.line}:${v.station}`
+}
+
+/* ------------------------------------------------------------------ */
+/* 輕鐵（路線 + 車站）                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface FavLr {
+  route: string
+  routeOrig_tc: string
+  routeOrig_en: string
+  routeDest_tc: string
+  routeDest_en: string
+  stopId: number
+  stopCode: string
+  stopName_tc: string
+  stopName_en: string
+  savedAt: number
+}
+
+export function loadFavLr(): FavLr[] {
+  return readJson<FavLr[]>(LR_KEY, [])
+}
+
+export function saveFavLr(list: FavLr[]) {
+  writeJson(LR_KEY, list)
+}
+
+export function favKeyLr(v: { route: string; stopId: number }) {
+  return `${v.route}:${v.stopId}`
 }
