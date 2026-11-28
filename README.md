@@ -1,10 +1,12 @@
-# hk-bus-mtr — 香港巴士到站 + 港鐵班次
+# hk-bus-mtr — 香港巴士到站 + 港鐵／輕鐵班次
 
 加強版實時公共交通 App，支援：
 
 - **九巴 (KMB)** 實時到站
 - **城巴 (CTB)** 實時到站
+- **綠色專線小巴 (GMB)** 實時到站
 - **港鐵 (MTR)** 各線實時班次
+- **輕鐵 (Light Rail)** 11 條路線實時班次
 - **地圖顯示**（桌面完整、手機可收起）
 - 定位附近巴士站
 - 繁中 / 英文切換
@@ -19,8 +21,10 @@
 | 附近站點 | 用瀏覽器定位找 800m 內九巴站 |
 | 地圖 | Leaflet + OpenStreetMap，手機可隱藏 |
 | 真實路線軌跡 | 巴士／小巴貼住馬路、港鐵貼住路軌（連過海隧道）畫線；缺資料時自動降級做站點連線 |
-| 到站時間 | 自動每 30 秒更新 |
+| 到站時間 | 自動每 30 秒更新（輕鐵每 20 秒） |
 | 港鐵 | 10 條主要路線 + 常用車站 |
+| 輕鐵 | 11 條路線（505、507、610、614、614P、615、615P、705、706、751、761P），按月台分組顯示班次 |
+| 小巴 | 綠色專線小巴，港島／九龍／新界路線搜尋，全線各站實時到站 + 全程車費 |
 | 城巴 | 支援手動輸入 Stop ID + 路線查詢 |
 | 響應式 | 手機 / 平板 / 桌面都好用 |
 
@@ -82,8 +86,16 @@ npm run build
 - Base: `https://rt.data.gov.hk/v2/transport/citybus`
 - `/route/CTB`、`/eta/CTB/{stop}/{route}` 等
 
+### 綠色專線小巴
+- Base: `https://data.etagmb.gov.hk`
+- `/route/{region}`（HKI / KLN / NT 路線清單）、`/route/{region}/{route_code}`、`/route-stop/{route_id}/{route_seq}`、`/eta/route-stop/{route_id}/{route_seq}/{stop_seq}`
+
 ### 港鐵
 - `https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=TWL&sta=TST&lang=TC`
+
+### 輕鐵
+- `https://rt.data.gov.hk/v1/transport/mtr/lrt/getSchedule?station_id=570&with_special=1`
+- 按車站 ID 查詢，回傳各月台班次（路線、目的地、到站分鐘、卡數）；車站資料嚟自港鐵開放數據 `light_rail_routes_and_stops.csv`
 
 ## 注意
 
