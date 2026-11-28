@@ -6,6 +6,7 @@ import MtrPanel from './components/MtrPanel'
 import GmbPanel from './components/GmbPanel'
 import LrPanel from './components/LrPanel'
 import type { GmbTarget } from './components/GmbPanel'
+import type { LrTarget } from './components/LrPanel'
 import LiveClock from './components/LiveClock'
 import {
   IconPin,
@@ -60,6 +61,8 @@ export default function App() {
   const [mtrStation, setMtrStation] = useState('HOK')
   // 小巴：由收藏跳入嘅目標
   const [gmbTarget, setGmbTarget] = useState<GmbTarget | null>(null)
+  // 輕鐵：由收藏跳入嘅目標
+  const [lrTarget, setLrTarget] = useState<LrTarget | null>(null)
 
   // Shared stop / ETA state
   const [selectedStop, setSelectedStop] = useState<BusStop | null>(null)
@@ -117,21 +120,25 @@ export default function App() {
     favRouteStops,
     favGmb,
     favMtr,
+    favLr,
     isStopFav,
     isRouteFav,
     isRouteStopFav,
     isGmbFav,
     isMtrFav,
+    isLrFav,
     toggleStop,
     toggleRoute,
     toggleRouteStop,
     toggleGmb,
     toggleMtr,
+    toggleLr,
     removeStop,
     removeRoute,
     removeRouteStop,
     removeGmb,
     removeMtr,
+    removeLr,
   } = useFavorites()
 
   const { reminders, addReminder, cancelReminder } = useReminders(lang)
@@ -1118,7 +1125,19 @@ export default function App() {
         }`}
       >
         {tab === 'lr' ? (
-          <LrPanel lang={lang} />
+          <LrPanel
+            lang={lang}
+            favLr={favLr}
+            isLrFav={isLrFav}
+            toggleLr={toggleLr}
+            removeLr={removeLr}
+            target={lrTarget}
+            onOpenFavorites={() => {
+              setTab('bus')
+              setBusMode('favorites')
+            }}
+            showToast={showToast}
+          />
         ) : tab === 'mtr' ? (
           <MtrPanel
             lang={lang}
@@ -1756,6 +1775,68 @@ export default function App() {
                               className="px-2 py-1.5 text-stone-300 hover:text-stone-600"
                               title={lang === 'tc' ? '移除' : 'Remove'}
                               onClick={() => removeMtr({ line: f.line, station: f.station })}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="label-cap mb-1.5">
+                      {lang === 'tc' ? '收藏輕鐵站' : 'Saved Light Rail stops'}
+                    </p>
+                    {favLr.length === 0 ? (
+                      <p className="text-xs leading-relaxed text-stone-500">
+                        {lang === 'tc'
+                          ? '喺「輕鐵」分頁揀好路線，撳站旁 ☆ 收藏。'
+                          : 'In the Light Rail tab, pick a route and tap ☆ next to a stop.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {favLr.map((f) => (
+                          <div
+                            key={`${f.route}-${f.stopId}`}
+                            className="flex items-center gap-1 rounded-lg border border-transparent hover:border-stone-200 hover:bg-stone-50"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTab('lr')
+                                setLrTarget({
+                                  route: f.route,
+                                  stopId: f.stopId,
+                                  nonce: Date.now(),
+                                })
+                              }}
+                              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left"
+                            >
+                              <span className="flex-shrink-0 rounded bg-[#0099A8] px-1 py-0.5 text-[8px] font-bold text-white">
+                                {lang === 'tc' ? '輕鐵' : 'LR'}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[13px] font-bold">
+                                  {f.route}{' '}
+                                  <span className="font-medium text-stone-500">
+                                    · {lang === 'tc' ? f.stopName_tc : f.stopName_en}
+                                  </span>
+                                </span>
+                                <span className="mt-0.5 block truncate text-[11px] text-stone-500">
+                                  → {lang === 'tc' ? f.routeDest_tc : f.routeDest_en}
+                                </span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 py-1.5 text-stone-300 hover:text-stone-600"
+                              title={lang === 'tc' ? '移除' : 'Remove'}
+                              onClick={() =>
+                                removeLr({
+                                  route: f.route,
+                                  stopId: f.stopId,
+                                })
+                              }
                             >
                               ✕
                             </button>
@@ -2528,7 +2609,8 @@ export default function App() {
                             favRoutes.length +
                             favRouteStops.length}{' '}
                           · {lang === 'tc' ? '小巴' : 'GMB'} {favGmb.length} ·{' '}
-                          {lang === 'tc' ? '港鐵' : 'MTR'} {favMtr.length}
+                          {lang === 'tc' ? '港鐵' : 'MTR'} {favMtr.length} ·{' '}
+                          {lang === 'tc' ? '輕鐵' : 'LR'} {favLr.length}
                         </p>
                       </div>
 
@@ -2536,7 +2618,8 @@ export default function App() {
                         favRoutes.length +
                         favRouteStops.length +
                         favGmb.length +
-                        favMtr.length ===
+                        favMtr.length +
+                        favLr.length ===
                       0 ? (
                         <div className="flex flex-col items-center justify-center px-6 py-12 text-center md:py-16">
                           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
@@ -2547,8 +2630,8 @@ export default function App() {
                           </h3>
                           <p className="mt-1 max-w-sm text-sm leading-relaxed text-stone-500">
                             {lang === 'tc'
-                              ? '喺巴士、小巴或港鐵分頁撳 ☆ 收藏，之後喺呢度一撳就睇到實時班次。'
-                              : 'Tap ☆ in the bus, minibus or MTR tab, then open it here in one tap.'}
+                              ? '喺巴士、小巴、港鐵或輕鐵分頁撳 ☆ 收藏，之後喺呢度一撳就睇到實時班次。'
+                              : 'Tap ☆ in the bus, minibus, MTR or Light Rail tab, then open it here in one tap.'}
                           </p>
                         </div>
                       ) : (
@@ -2646,6 +2729,52 @@ export default function App() {
                                     </button>
                                   )
                                 })}
+                              </div>
+                            </section>
+                          )}
+
+                          {favLr.length > 0 && (
+                            <section>
+                              <p className="label-cap mb-1.5">
+                                {lang === 'tc' ? '輕鐵站' : 'Light Rail stops'}
+                              </p>
+                              <div className="space-y-1.5">
+                                {favLr.map((f) => (
+                                  <button
+                                    key={`${f.route}-${f.stopId}`}
+                                    type="button"
+                                    onClick={() => {
+                                      setTab('lr')
+                                      setLrTarget({
+                                        route: f.route,
+                                        stopId: f.stopId,
+                                        nonce: Date.now(),
+                                      })
+                                    }}
+                                    className="flex w-full items-center gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-stone-50"
+                                  >
+                                    <span
+                                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[8px] font-black leading-none text-white"
+                                      style={{ backgroundColor: '#0099A8' }}
+                                    >
+                                      {lang === 'tc' ? '輕鐵' : 'LR'}
+                                    </span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-[13px] font-bold">
+                                        {f.route}
+                                        <span className="font-medium text-stone-500">
+                                          {' · '}
+                                          {lang === 'tc' ? f.stopName_tc : f.stopName_en}
+                                        </span>
+                                      </span>
+                                      <span className="mt-0.5 block truncate text-[11px] text-stone-500">
+                                        {lang === 'tc' ? '往' : 'to'}{' '}
+                                        {lang === 'tc' ? f.routeDest_tc : f.routeDest_en}
+                                      </span>
+                                    </span>
+                                    <IconChevron className="h-4 w-4 flex-shrink-0 text-stone-300" />
+                                  </button>
+                                ))}
                               </div>
                             </section>
                           )}
