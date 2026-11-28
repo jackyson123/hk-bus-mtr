@@ -4,6 +4,7 @@ import MapView from './components/MapView'
 import EtaList from './components/EtaList'
 import MtrPanel from './components/MtrPanel'
 import GmbPanel from './components/GmbPanel'
+import LrPanel from './components/LrPanel'
 import type { GmbTarget } from './components/GmbPanel'
 import LiveClock from './components/LiveClock'
 import {
@@ -46,7 +47,7 @@ import {
 } from './lib/api'
 import type { BusStop, EtaItem, Lang, NearbyStop } from './types'
 
-type Tab = 'bus' | 'gmb' | 'mtr'
+type Tab = 'bus' | 'gmb' | 'mtr' | 'lr'
 type BusMode = 'route' | 'nearby' | 'search' | 'favorites'
 
 export default function App() {
@@ -1016,7 +1017,7 @@ export default function App() {
                 hk-bus-mtr
               </h1>
               <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-stone-500">
-                {lang === 'tc' ? '九巴 · 城巴 · 小巴 · 港鐵' : 'KMB · Citybus · GMB · MTR'}
+                {lang === 'tc' ? '九巴 · 城巴 · 小巴 · 港鐵 · 輕鐵' : 'KMB · Citybus · GMB · MTR · Light Rail'}
               </p>
             </div>
           </div>
@@ -1028,6 +1029,7 @@ export default function App() {
                 ['bus', lang === 'tc' ? '巴士' : 'Bus', IconBus],
                 ['gmb', lang === 'tc' ? '小巴' : 'Minibus', IconMinibus],
                 ['mtr', lang === 'tc' ? '港鐵' : 'MTR', IconTrain],
+                ['lr', lang === 'tc' ? '輕鐵' : 'Light Rail', IconTrain],
               ] as const
             ).map(([key, label, Icon]) => (
               <button
@@ -1046,6 +1048,8 @@ export default function App() {
                         ? 'text-[#0B7A3B]'
                         : key === 'mtr'
                         ? 'text-mtr'
+                        : key === 'lr'
+                        ? 'text-[#0099A8]'
                         : 'text-[#e30613]'
                       : ''
                   }`}
@@ -1086,6 +1090,7 @@ export default function App() {
               ['bus', lang === 'tc' ? '巴士' : 'Bus', IconBus],
               ['gmb', lang === 'tc' ? '小巴' : 'Minibus', IconMinibus],
               ['mtr', lang === 'tc' ? '港鐵' : 'MTR', IconTrain],
+              ['lr', lang === 'tc' ? '輕鐵' : 'Light Rail', IconTrain],
             ] as const
           ).map(([key, label, Icon]) => (
             <button
@@ -1112,7 +1117,9 @@ export default function App() {
             : ''
         }`}
       >
-        {tab === 'mtr' ? (
+        {tab === 'lr' ? (
+          <LrPanel lang={lang} />
+        ) : tab === 'mtr' ? (
           <MtrPanel
             lang={lang}
             line={mtrLine}
