@@ -1,11 +1,32 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { LR_ROUTES, type LrRoute, type LrStop } from '../lib/lrData'
 import { getLrSchedule, type LrPlatformGroup, type LrDeparture } from '../lib/lr'
-import { IconRefresh, IconTrain } from './Icons'
-import type { Lang } from '../types'
+import MapView from './MapView'
+import {
+  IconRefresh,
+  IconTrain,
+  IconStar,
+  IconMap,
+  IconChevron,
+} from './Icons'
+import type { Lang, BusStop } from '../types'
+import type { FavLr } from '../lib/favorites'
+
+export interface LrTarget {
+  route: string
+  stopId: number
+  nonce: number
+}
 
 interface Props {
   lang: Lang
+  favLr: FavLr[]
+  isLrFav: (v: { route: string; stopId: number }) => boolean
+  toggleLr: (item: Omit<FavLr, 'savedAt'>) => void
+  removeLr: (v: { route: string; stopId: number }) => void
+  target: LrTarget | null
+  onOpenFavorites: () => void
+  showToast: (msg: string) => void
 }
 
 function pad2(n: number): string {
@@ -14,14 +35,25 @@ function pad2(n: number): string {
 
 const LR_COLOR = '#0099A8'
 
-export default function LrPanel({ lang }: Props) {
+export default function LrPanel({
+  lang,
+  favLr,
+  isLrFav,
+  toggleLr,
+  removeLr,
+  target,
+  onOpenFavorites,
+  showToast,
+}: Props) {
   const [route, setRoute] = useState<LrRoute>(LR_ROUTES[0])
   const [stop, setStop] = useState<LrStop>(LR_ROUTES[0].stops[0])
   const [groups, setGroups] = useState<LrPlatformGroup[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
+  const [mapOpen, setMapOpen] = useState(false)
   const stopRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<HTMLDivElement | null>(null)
 
   const t = useCallback(
     (tc: string, en: string) => (lang === 'tc' ? tc : en),
@@ -80,6 +112,21 @@ export default function LrPanel({ lang }: Props) {
     }, 120)
   }
 
+  // 由「收藏」總覽跳入嚟
+  const lastTarget = useRef<number>(0)
+  useEffect(() => {
+    if (!target || target.nonce === lastTarget.current) return
+    lastTarget.current = target.nonce
+    const r = LR_ROUTES.find((x) => x.code === target.route)
+    if (!r) return
+    setRoute(r)
+    const s = r.stops.find((x) => x.id === target.stopId) || r.stops[0]
+    if (s) {
+      setStop(s)
+      setGroups([])
+    }
+  }, [target])
+
   const timeText = (d: LrDeparture): string => {
     if (d.status === 'departing') return t('正在離開', 'Departing')
     if (d.status === 'arriving') return t('即將到達', 'Arriving')
@@ -95,10 +142,129 @@ export default function LrPanel({ lang }: Props) {
     lang === 'tc' ? route.orig_tc : route.orig_en
   } → ${lang === 'tc' ? route.dest_tc : route.dest_en}`
 
+  /** 目前路線全部車站（地圖用） */
+  const mapStops: BusStop[] = useMemo(
+    () =>
+      route.stops.map((s) => ({
+        id: String(s.id),
+        name_tc: s.name_tc,
+        name_en: s.name_en,
+        lat: s.lat,
+        lng: s.lng,
+        operator: 'MTR' as const,
+      })),
+    [route]
+  )
+
+  const isCurrentFav = isLrFav({ route: route.code, stopId: stop.id })
+
+  const onToggleFavStop = (s: LrStop, r: LrRoute = route) => {
+    const key = { route: r.code, stopId: s.id }
+    const wasFav = isLrFav(key)
+    toggleLr({
+      route: r.code,
+      routeOrig_tc: r.orig_tc,
+      routeOrig_en: r.orig_en,
+      routeDest_tc: r.dest_tc,
+      routeDest_en: r.dest_en,
+      stopId: s.id,
+      stopCode: s.code,
+      stopName_tc: s.name_tc,
+      stopName_en: s.name_en,
+    })
+    showToast(wasFav ? t('已取消收藏', 'Removed favourite') : t('已收藏輕鐵站', 'Saved Light Rail stop'))
+  }
+
+  const gotoFav = (f: FavLr) => {
+    const r = LR_ROUTES.find((x) => x.code === f.route)
+    if (!r) return
+    setRoute(r)
+    const s = r.stops.find((x) => x.id === f.stopId) || r.stops[0]
+    if (s) {
+      setStop(s)
+      setGroups([])
+    }
+  }
+
+  const favCard = (
+    <div
+      className={`border-b border-stone-200/70 px-3 py-3 md:rounded-2xl md:border md:border-stone-200/80 md:bg-white md:p-3.5 md:shadow-sm ${
+        favLr.length === 0 ? 'hidden md:block' : ''
+      }`}
+    >
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="label-cap flex items-center gap-1.5">
+          <IconStar className="h-3.5 w-3.5" filled />
+          {t('收藏輕鐵站', 'Saved Light Rail stops')}
+        </p>
+        <button
+          type="button"
+          onClick={onOpenFavorites}
+          className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-stone-500 transition hover:text-stone-900"
+        >
+          {t('全部收藏', 'All')}
+          <IconChevron className="h-3 w-3" />
+        </button>
+      </div>
+      {favLr.length === 0 ? (
+        <p className="text-[11px] leading-relaxed text-stone-500">
+          {t(
+            '喺站旁撳 ☆ 就可以收藏呢條輕鐵線嘅站。',
+            'Tap ☆ next to a stop to save this Light Rail route stop.'
+          )}
+        </p>
+      ) : (
+        <div className="max-h-[26vh] space-y-1 overflow-y-auto pr-1 md:max-h-[30vh]">
+          {favLr.map((f) => {
+            const active = route.code === f.route && stop.id === f.stopId
+            return (
+              <div
+                key={`${f.route}-${f.stopId}`}
+                className={`flex items-center gap-1 rounded-lg border ${
+                  active
+                    ? 'border-teal-300 bg-teal-50'
+                    : 'border-transparent hover:border-stone-200 hover:bg-stone-50'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => gotoFav(f)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left"
+                >
+                  <span className="flex-shrink-0 rounded bg-[#0099A8] px-1 py-0.5 text-[8px] font-bold text-white">
+                    {t('輕鐵', 'LR')}
+                  </span>
+                  <span className="flex-shrink-0 text-[12px] font-bold">
+                    {f.route}
+                  </span>
+                  <span className="truncate text-[11px] text-stone-600">
+                    {lang === 'tc' ? f.stopName_tc : f.stopName_en}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeLr({ route: f.route, stopId: f.stopId })}
+                  className="px-1.5 py-1 text-[11px] text-stone-300 transition hover:text-stone-700"
+                  title={t('移除', 'Remove')}
+                  aria-label={t('移除收藏', 'Remove favourite')}
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
   return (
-    <div className="flex min-h-0 flex-none flex-col md:h-full md:flex-1 md:flex-row md:gap-3 md:overflow-hidden md:p-4">
-      {/* ─────────── 左欄：路線 + 車站 ─────────── */}
-      <aside className="flex flex-shrink-0 flex-col md:min-h-0 md:w-[300px] md:gap-3 md:overflow-y-auto xl:w-[320px]">
+    <div
+      data-testid="lr-panel"
+      className="flex min-h-0 flex-none flex-col md:h-full md:flex-1 md:flex-row md:gap-3 md:overflow-hidden md:p-4 xl:grid xl:grid-cols-[320px_minmax(0,1fr)_minmax(360px,31%)] xl:grid-rows-1"
+    >
+      {/* ─────────── 左欄：路線 + 車站 + 收藏 ─────────── */}
+      <aside className="flex flex-shrink-0 flex-col md:min-h-0 md:w-[300px] md:gap-3 md:overflow-y-auto xl:w-auto">
         {/* 路線 */}
         <div className="border-b border-stone-200/70 px-3 py-3 md:rounded-2xl md:border md:border-stone-200/80 md:bg-white md:p-3.5 md:shadow-sm">
           <p className="label-cap mb-2 flex items-center gap-1.5">
@@ -150,201 +316,322 @@ export default function LrPanel({ lang }: Props) {
           <div className="max-h-[32vh] space-y-0.5 overflow-y-auto pr-1 md:max-h-none">
             {route.stops.map((s, i) => {
               const active = stop.id === s.id
+              const fav = isLrFav({ route: route.code, stopId: s.id })
               return (
-                <button
+                <div
                   key={`${s.id}-${i}`}
-                  type="button"
-                  onClick={() => pickStop(s)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition ${
+                  className={`flex items-center gap-1 rounded-lg transition ${
                     active
-                      ? 'bg-[#0099A8]/10 font-bold text-stone-900 shadow-[inset_3px_0_0_0_#0099A8]'
-                      : 'text-stone-700 hover:bg-stone-50'
+                      ? 'bg-[#0099A8]/10 shadow-[inset_3px_0_0_0_#0099A8]'
+                      : 'hover:bg-stone-50'
                   }`}
                 >
-                  <span
-                    className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold tabular-nums ${
-                      active ? 'bg-[#0099A8] text-white' : 'bg-stone-100 text-stone-600'
+                  <button
+                    type="button"
+                    onClick={() => pickStop(s)}
+                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left ${
+                      active ? 'font-bold text-stone-900' : 'text-stone-700'
                     }`}
                   >
-                    {i + 1}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px]">
-                    {lang === 'tc' ? s.name_tc : s.name_en}
-                  </span>
-                  <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
-                    {s.code}
-                  </span>
-                </button>
+                    <span
+                      className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold tabular-nums ${
+                        active ? 'bg-[#0099A8] text-white' : 'bg-stone-100 text-stone-600'
+                      }`}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px]">
+                      {lang === 'tc' ? s.name_tc : s.name_en}
+                    </span>
+                    <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                      {s.code}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onToggleFavStop(s)}
+                    className={`rounded-md px-1 py-1 transition ${
+                      fav
+                        ? 'text-amber-500'
+                        : 'text-stone-300 hover:text-stone-500'
+                    }`}
+                    title={
+                      fav
+                        ? t('取消收藏', 'Remove favourite')
+                        : t('收藏此站', 'Save this stop')
+                    }
+                    aria-label={t('收藏此站', 'Save this stop')}
+                  >
+                    <IconStar className="h-4 w-4" filled={fav} />
+                  </button>
+                </div>
               )
             })}
           </div>
         </div>
+
+        {favCard}
       </aside>
 
-      {/* ─────────── 右邊：實時班次板 ─────────── */}
-      <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 md:overflow-hidden md:px-0 md:pt-0">
-        <div className="flex min-h-0 flex-col md:flex-1 md:overflow-hidden md:rounded-2xl md:border md:border-stone-200/80 md:bg-white md:shadow-sm">
-          {/* 板頭 */}
-          <div className="flex items-center justify-between gap-3 border-b border-stone-200/70 px-4 py-3">
-            <div className="min-w-0">
-              <p className="label-cap flex items-center gap-1.5">
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: LR_COLOR }}
-                />
-                {t('輕鐵實時班次', 'Light Rail live departures')}
-              </p>
-              <h2 className="truncate text-[17px] font-bold tracking-tight">
-                {stopName}
-              </h2>
-              <p className="mt-0.5 truncate text-[11px] text-stone-500">
-                {routeTitle}
-              </p>
-            </div>
-            <div className="flex flex-shrink-0 items-center gap-1.5">
-              {loading && (
-                <span className="text-[11px] font-medium text-stone-500">
-                  {t('更新中…', 'Updating…')}
-                </span>
-              )}
-              {updatedAt && !loading && (
-                <span className="hidden items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-800 sm:flex">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  </span>
-                  {t('實時 · 每 20 秒更新', 'Live · every 20s')}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => load(stop, true)}
-                disabled={loading}
-                className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-stone-600 transition hover:border-stone-400 disabled:opacity-40"
-              >
-                <IconRefresh className="h-3 w-3" />
-                {t('更新', 'Refresh')}
-              </button>
-            </div>
-          </div>
-
-          {/* 板身 */}
-          <div ref={stopRef} className="min-h-0 flex-1 md:overflow-y-auto">
-            {loading && (
-              <div className="space-y-2 p-3 md:p-4">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div
-                    key={i}
-                    className="h-14 animate-pulse rounded-xl border border-stone-100 bg-stone-50"
+      <div className="flex min-h-0 flex-1 flex-col md:overflow-hidden xl:contents">
+        {/* ─────────── 中間：實時班次板 ─────────── */}
+        <section className="flex min-h-0 flex-col px-3 pt-3 md:overflow-hidden md:px-0 md:pt-0">
+          <div className="flex min-h-0 flex-col md:flex-1 md:overflow-hidden md:rounded-2xl md:border md:border-stone-200/80 md:bg-white md:shadow-sm">
+            {/* 板頭 */}
+            <div className="flex items-center justify-between gap-3 border-b border-stone-200/70 px-4 py-3">
+              <div className="min-w-0">
+                <p className="label-cap flex items-center gap-1.5">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: LR_COLOR }}
                   />
-                ))}
-              </div>
-            )}
-
-            {!loading && error && (
-              <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-                <p className="text-sm font-bold">{t('載入失敗', 'Failed to load')}</p>
-                <p className="mt-1 max-w-xs break-words text-xs leading-relaxed text-stone-500">
-                  {error}
+                  {t('輕鐵實時班次', 'Light Rail live departures')}
                 </p>
+                <h2 className="truncate text-[17px] font-bold tracking-tight">
+                  {stopName}
+                </h2>
+                <p className="mt-0.5 truncate text-[11px] text-stone-500">
+                  {routeTitle}
+                </p>
+              </div>
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                {loading && (
+                  <span className="text-[11px] font-medium text-stone-500">
+                    {t('更新中…', 'Updating…')}
+                  </span>
+                )}
+                {updatedAt && !loading && (
+                  <span className="hidden items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-800 sm:flex">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    </span>
+                    {t('實時 · 每 20 秒更新', 'Live · every 20s')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onToggleFavStop(stop)}
+                  className={`inline-flex items-center justify-center rounded-lg border px-2 py-1.5 transition ${
+                    isCurrentFav
+                      ? 'border-amber-300 bg-amber-50 text-amber-600'
+                      : 'border-stone-200 bg-white text-stone-500 hover:border-stone-300'
+                  }`}
+                  title={
+                    isCurrentFav
+                      ? t('已收藏，撳一下取消', 'Saved — tap to remove')
+                      : t('收藏此站', 'Save this stop')
+                  }
+                  aria-label={t('收藏此站', 'Save this stop')}
+                >
+                  <IconStar className="h-3.5 w-3.5" filled={isCurrentFav} />
+                </button>
                 <button
                   type="button"
                   onClick={() => load(stop, true)}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-stone-700"
+                  disabled={loading}
+                  className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-stone-600 transition hover:border-stone-400 disabled:opacity-40"
                 >
-                  <IconRefresh className="h-3.5 w-3.5" />
-                  {t('再試一次', 'Retry')}
+                  <IconRefresh className="h-3 w-3" />
+                  {t('更新', 'Refresh')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setMapOpen((v) => {
+                      const next = !v
+                      if (next) {
+                        window.setTimeout(() => {
+                          mapRef.current?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'center',
+                          })
+                        }, 180)
+                      }
+                      return next
+                    })
+                  }
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition md:hidden ${
+                    mapOpen
+                      ? 'border-stone-900 bg-stone-900 text-white'
+                      : 'border-stone-200 bg-white text-stone-700'
+                  }`}
+                >
+                  <IconMap className="h-3.5 w-3.5" />
+                  {t('地圖', 'Map')}
                 </button>
               </div>
-            )}
+            </div>
 
-            {!loading && !error && !hasDepartures && (
-              <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
-                  <IconTrain className="h-6 w-6" />
+            {/* 板身 */}
+            <div ref={stopRef} className="min-h-0 flex-1 md:overflow-y-auto">
+              {loading && (
+                <div className="space-y-2 p-3 md:p-4">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div
+                      key={i}
+                      className="h-14 animate-pulse rounded-xl border border-stone-100 bg-stone-50"
+                    />
+                  ))}
                 </div>
-                <h3 className="text-sm font-bold">
-                  {t('呢個站暫時冇班次', 'No departures right now')}
-                </h3>
-                <p className="mt-1 max-w-xs text-xs leading-relaxed text-stone-500">
-                  {t(
-                    '可能係尾班車已開出，或者服務未開始。試下另一個站，或者遲啲再睇。',
-                    'The last train may have left, or service has not started yet. Try another stop or check again later.'
-                  )}
-                </p>
+              )}
+
+              {!loading && error && (
+                <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+                  <p className="text-sm font-bold">{t('載入失敗', 'Failed to load')}</p>
+                  <p className="mt-1 max-w-xs break-words text-xs leading-relaxed text-stone-500">
+                    {error}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => load(stop, true)}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-stone-700"
+                  >
+                    <IconRefresh className="h-3.5 w-3.5" />
+                    {t('再試一次', 'Retry')}
+                  </button>
+                </div>
+              )}
+
+              {!loading && !error && !hasDepartures && (
+                <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
+                    <IconTrain className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-sm font-bold">
+                    {t('呢個站暫時冇班次', 'No departures right now')}
+                  </h3>
+                  <p className="mt-1 max-w-xs text-xs leading-relaxed text-stone-500">
+                    {t(
+                      '可能係尾班車已開出，或者服務未開始。試下另一個站，或者遲啲再睇。',
+                      'The last train may have left, or service has not started yet. Try another stop or check again later.'
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {!loading &&
+                !error &&
+                groups.map((g) => {
+                  if (!g.departures.length) return null
+                  return (
+                    <div key={g.platform} className="border-b border-stone-100 last:border-0">
+                      <div className="flex items-center gap-2 border-b border-stone-200/70 bg-stone-50/70 px-3 py-2 md:px-4">
+                        <p className="label-cap">
+                          {t(`${g.platform} 號月台`, `Platform ${g.platform}`)}
+                        </p>
+                        <span className="text-[10px] font-medium tabular-nums text-stone-400">
+                          {g.departures.length} {t('班', 'trains')}
+                        </span>
+                        {updatedAt && (
+                          <span className="ml-auto text-[10px] tabular-nums text-stone-400">
+                            {t('更新 ', 'Updated ')}
+                            {updatedAt}
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        {g.departures.map((d, i) => (
+                          <div
+                            key={`${d.routeNo}-${d.dest_en}-${i}`}
+                            className="fade-up grid grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-2 border-b border-stone-100 px-3 py-2.5 last:border-0 hover:bg-stone-50 md:px-4"
+                          >
+                            <span
+                              className="flex h-8 items-center justify-center rounded-lg text-[13px] font-black tabular-nums text-white"
+                              style={{ backgroundColor: LR_COLOR }}
+                            >
+                              {d.routeNo}
+                            </span>
+                            <div className="min-w-0">
+                              <span className="block truncate text-[13px] font-semibold md:text-sm">
+                                {t('往 ', 'To ')}
+                                {lang === 'tc' ? d.dest_tc : d.dest_en}
+                              </span>
+                              {d.cars != null && (
+                                <span className="mt-0.5 block text-[10px] font-medium text-stone-400">
+                                  {t(`${d.cars} 卡`, `${d.cars} car${d.cars > 1 ? 's' : ''}`)}
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className={`inline-flex min-w-[4.5rem] flex-col items-center justify-center rounded-lg px-2 py-1 leading-tight ${
+                                d.status === 'departing'
+                                  ? 'bg-amber-100 text-amber-900'
+                                  : d.status === 'arriving'
+                                  ? 'bg-emerald-100 text-emerald-900'
+                                  : 'bg-stone-100 text-stone-700'
+                              }`}
+                            >
+                              <span className="text-[13px] font-bold tabular-nums">
+                                {timeText(d)}
+                              </span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+          <p className="px-4 py-3 text-center text-xs text-stone-500">
+            {t(
+              '班次資料嚟自港鐵開放數據，每 20 秒自動更新。',
+              'Departure data from MTR open data, auto-refreshed every 20 seconds.'
+            )}
+          </p>
+        </section>
+
+        {/* ─────────── 右邊：地圖 ─────────── */}
+        <div
+          ref={mapRef}
+          className={`${
+            mapOpen ? 'block' : 'hidden'
+          } flex-shrink-0 px-3 pb-3 pt-3 md:block md:min-h-[220px] md:flex-1 md:px-0 md:pb-0 md:pt-0 xl:flex-none`}
+        >
+          <div className="relative h-56 overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-card md:h-full">
+            <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-xl border border-stone-200/70 bg-white/92 px-2.5 py-1.5 shadow-sm backdrop-blur">
+              <IconMap className="h-3.5 w-3.5 text-[#0099A8]" />
+              <span className="text-[11px] font-semibold text-stone-800">
+                {t('輕鐵路線圖', 'Light Rail map')}
+              </span>
+              <span className="text-[10px] font-medium tabular-nums text-stone-500">
+                {mapStops.length} {t('站', 'stops')}
+              </span>
+            </div>
+            {mapStops.length > 0 ? (
+              <MapView
+                userLat={null}
+                userLng={null}
+                stops={mapStops}
+                selectedStopId={String(stop.id)}
+                onSelectStop={(s) => {
+                  const hit = route.stops.find((x) => String(x.id) === s.id)
+                  if (hit) pickStop(hit)
+                }}
+                lang={lang}
+                height="100%"
+                fitToStops={true}
+                fitKey={`lr-${route.code}`}
+                showRouteLine={mapStops.length > 1}
+                routeColor="#0099A8"
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-xs text-stone-500">
+                <IconMap className="h-6 w-6 text-stone-300" />
+                {t('查一條輕鐵線，就會見到路線圖。', 'Search a route to see its map.')}
               </div>
             )}
-
-            {!loading &&
-              !error &&
-              groups.map((g) => {
-                if (!g.departures.length) return null
-                return (
-                  <div key={g.platform} className="border-b border-stone-100 last:border-0">
-                    <div className="flex items-center gap-2 border-b border-stone-200/70 bg-stone-50/70 px-3 py-2 md:px-4">
-                      <p className="label-cap">
-                        {t(`${g.platform} 號月台`, `Platform ${g.platform}`)}
-                      </p>
-                      <span className="text-[10px] font-medium tabular-nums text-stone-400">
-                        {g.departures.length} {t('班', 'trains')}
-                      </span>
-                      {updatedAt && (
-                        <span className="ml-auto text-[10px] tabular-nums text-stone-400">
-                          {t('更新 ', 'Updated ')}
-                          {updatedAt}
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      {g.departures.map((d, i) => (
-                        <div
-                          key={`${d.routeNo}-${d.dest_en}-${i}`}
-                          className="fade-up grid grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-x-2 border-b border-stone-100 px-3 py-2.5 last:border-0 hover:bg-stone-50 md:px-4"
-                        >
-                          <span
-                            className="flex h-8 items-center justify-center rounded-lg text-[13px] font-black tabular-nums text-white"
-                            style={{ backgroundColor: LR_COLOR }}
-                          >
-                            {d.routeNo}
-                          </span>
-                          <div className="min-w-0">
-                            <span className="block truncate text-[13px] font-semibold md:text-sm">
-                              {t('往 ', 'To ')}
-                              {lang === 'tc' ? d.dest_tc : d.dest_en}
-                            </span>
-                            {d.cars != null && (
-                              <span className="mt-0.5 block text-[10px] font-medium text-stone-400">
-                                {t(`${d.cars} 卡`, `${d.cars} car${d.cars > 1 ? 's' : ''}`)}
-                              </span>
-                            )}
-                          </div>
-                          <span
-                            className={`inline-flex min-w-[4.5rem] flex-col items-center justify-center rounded-lg px-2 py-1 leading-tight ${
-                              d.status === 'departing'
-                                ? 'bg-amber-100 text-amber-900'
-                                : d.status === 'arriving'
-                                ? 'bg-emerald-100 text-emerald-900'
-                                : 'bg-stone-100 text-stone-700'
-                            }`}
-                          >
-                            <span className="text-[13px] font-bold tabular-nums">
-                              {timeText(d)}
-                            </span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+            <div className="pointer-events-none absolute bottom-2 left-3 z-10 flex items-center gap-2 rounded-lg border border-stone-200/70 bg-white/92 px-2 py-1 text-[9px] font-medium text-stone-600 shadow-sm">
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-[#0099A8]" />
+                {t('輕鐵站', 'LR')}
+              </span>
+              <span className="h-2.5 w-px bg-stone-300" />
+              <span className="text-stone-400">© OpenStreetMap</span>
+            </div>
           </div>
         </div>
-        <p className="px-4 py-3 text-center text-xs text-stone-500">
-          {t(
-            '班次資料嚟自港鐵開放數據，每 20 秒自動更新。',
-            'Departure data from MTR open data, auto-refreshed every 20 seconds.'
-          )}
-        </p>
       </div>
     </div>
   )
