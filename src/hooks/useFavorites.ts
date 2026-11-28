@@ -7,11 +7,13 @@ import {
   loadFavRouteStops,
   loadFavGmb,
   loadFavMtr,
+  loadFavLr,
   saveFavStops,
   saveFavRoutes,
   saveFavRouteStops,
   saveFavGmb,
   saveFavMtr,
+  saveFavLr,
   stopToFav,
   variantToFav,
   favKeyStop,
@@ -19,11 +21,13 @@ import {
   favKeyRouteStop,
   favKeyGmb,
   favKeyMtr,
+  favKeyLr,
   type FavStop,
   type FavRoute,
   type FavRouteStop,
   type FavGmb,
   type FavMtr,
+  type FavLr,
 } from '../lib/favorites'
 
 export function useFavorites() {
@@ -32,6 +36,7 @@ export function useFavorites() {
   const [favRouteStops, setFavRouteStops] = useState<FavRouteStop[]>([])
   const [favGmb, setFavGmb] = useState<FavGmb[]>([])
   const [favMtr, setFavMtr] = useState<FavMtr[]>([])
+  const [favLr, setFavLr] = useState<FavLr[]>([])
 
   useEffect(() => {
     setFavStops(loadFavStops())
@@ -39,6 +44,7 @@ export function useFavorites() {
     setFavRouteStops(loadFavRouteStops())
     setFavGmb(loadFavGmb())
     setFavMtr(loadFavMtr())
+    setFavLr(loadFavLr())
   }, [])
 
   const isStopFav = useCallback(
@@ -75,6 +81,12 @@ export function useFavorites() {
     (v: { line: string; station: string }) =>
       favMtr.some((r) => favKeyMtr(r) === favKeyMtr(v)),
     [favMtr]
+  )
+
+  const isLrFav = useCallback(
+    (v: { route: string; stopId: number }) =>
+      favLr.some((r) => favKeyLr(r) === favKeyLr(v)),
+    [favLr]
   )
 
   const toggleStop = useCallback((stop: BusStop) => {
@@ -137,6 +149,18 @@ export function useFavorites() {
     })
   }, [])
 
+  const toggleLr = useCallback((item: Omit<FavLr, 'savedAt'>) => {
+    setFavLr((prev) => {
+      const key = favKeyLr(item)
+      const exists = prev.some((r) => favKeyLr(r) === key)
+      const next = exists
+        ? prev.filter((r) => favKeyLr(r) !== key)
+        : [{ ...item, savedAt: Date.now() }, ...prev].slice(0, 40)
+      saveFavLr(next)
+      return next
+    })
+  }, [])
+
   const removeStop = useCallback((operator: string, id: string) => {
     setFavStops((prev) => {
       const next = prev.filter(
@@ -194,26 +218,38 @@ export function useFavorites() {
     })
   }, [])
 
+  const removeLr = useCallback((v: { route: string; stopId: number }) => {
+    setFavLr((prev) => {
+      const next = prev.filter((r) => favKeyLr(r) !== favKeyLr(v))
+      saveFavLr(next)
+      return next
+    })
+  }, [])
+
   return {
     favStops,
     favRoutes,
     favRouteStops,
     favGmb,
     favMtr,
+    favLr,
     isStopFav,
     isRouteFav,
     isRouteStopFav,
     isGmbFav,
     isMtrFav,
+    isLrFav,
     toggleStop,
     toggleRoute,
     toggleRouteStop,
     toggleGmb,
     toggleMtr,
+    toggleLr,
     removeStop,
     removeRoute,
     removeRouteStop,
     removeGmb,
     removeMtr,
+    removeLr,
   }
 }
